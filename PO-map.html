@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parrot Optimizer — Literature Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script type="module">
+/* ============================================================
+   FIREBASE SETUP — this is the only part you need to edit.
+   1. Create a free project at https://console.firebase.google.com
+   2. Enable Firestore Database (any region), set open rules (see the
+      setup guide you were given alongside this file).
+   3. Project settings → your apps → add a Web app → copy the config
+      object it gives you and paste it below, replacing the empty one.
+   Leave it empty and the map still works fine, just local-only —
+   nothing else in this file needs to change.
+   ============================================================ */
+const firebaseConfig = {
+  // apiKey: "...",
+  // authDomain: "...",
+  // projectId: "...",
+  // storageBucket: "...",
+  // messagingSenderId: "...",
+  // appId: "...",
+};
+
+let fbReady = false;
+try {
+  if (firebaseConfig.projectId) {
+    const { initializeApp } = await import("https://cdn.jsdelivr.net/npm/firebase@12/app/+esm");
+    const {
+      getFirestore, doc, getDoc, setDoc, onSnapshot,
+      collection, getDocs, writeBatch
+    } = await import("https://cdn.jsdelivr.net/npm/firebase@12/firestore/+esm");
+
+    const app = initializeApp(firebaseConfig);
+    const dbfs = getFirestore(app);
+
+    window.FB = {
+      ready: () => fbReady,
+      getGraph: async () => {
+        const snap = await getDoc(doc(dbfs, 'meta', 'graph'));
+        return snap.exists() ? snap.data() : null;
+      },
+      setGraph: async (data) => { await setDoc(doc(dbfs, 'meta', 'graph'), data); },
+      getPapers: async () => {
+        const snap = await getDocs(collection(dbfs, 'papers'));
+        return snap.docs.map(d => d.data());
+      },
+      setPaper: async (p) => { await setDoc(doc(dbfs, 'papers', p.id), p); },
+      seedPapersBatch: async (list) => {
+        const batch = writeBatch(dbfs);
+        list.forEach(p => batch.set(doc(dbfs, 'papers', p.id), p));
+        await batch.commit();
+      },
+      onGraphChange: (cb) => onSnapshot(doc(dbfs, 'meta', 'graph'), snap => { if (snap.exists()) cb(snap.data()); }),
+      onPapersChange: (cb) => onSnapshot(collection(dbfs, 'papers'), snap => cb(snap.docs.map(d => d.data()))),
+    };
+    fbReady = true;
+  } else {
+    window.FB = { ready: () => false };
+  }
+} catch (e) {
+  console.error('Firebase failed to initialize:', e);
+  window.FB = { ready: () => false };
+}
+window.dispatchEvent(new Event('fb-ready'));
+</script>
+<style>
+:root{
+  --bg:#040405; --bg2:#08090d;
+  --ink:#eef1f6; --ink-dim:#8b93a3; --ink-faint:#565f70;
+  --line:#1b1f29; --line-soft:#14171f;
+  --panel:rgba(9,11,15,.86);
+  --root:#f5efe1;
+  --c-po:#2fe3b8; --c-thesis:#ff6f91; --c-problem:#f6c453; --c-swarm:#4fb3ff;
+  --c-evo:#b18bf5; --c-theory:#8d97ab; --c-review:#ff9256;
+  --shadow: 0 20px 60px rgba(0,0,0,.55);
+  --sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+:root:not([data-theme="light"]){ color-scheme: dark; }
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){ --bg:#040405; --bg2:#08090d; --ink:#eef1f6; }
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:radial-gradient(ellipse 120% 90% at 50% 0%, #0a0d14 0%, var(--bg) 55%, #000 100%);
+  color:var(--ink); font-family:var(--sans); overflow:hidden;
+}
+#stage{position:fixed; inset:0;}
+svg{width:100%; height:100%; display:block; cursor:grab;}
+svg:active{cursor:grabbing;}
+
+/* ---------- header ---------- */
+#hdr{position:fixed; top:0; left:0; right:0; z-index:20; padding:22px 26px 0 26px;
+  pointer-events:none; display:flex; justify-content:space-between; align-items:flex-start; gap:24px;}
+#hdr .titles{pointer-events:auto; max-width:560px;}
+#hdr h1{font-size:15px; font-weight:600; letter-spacing:.01em; margin:0 0 4px 0; color:var(--ink);}
+#hdr p{font-size:12.5px; line-height:1.5; color:var(--ink-dim); margin:0; max-width:480px;}
+#stats{pointer-events:auto; font-family:var(--mono); font-size:11px; color:var(--ink-faint);
+  text-align:right; white-space:nowrap; padding-top:2px;}
+#stats b{color:var(--ink-dim); font-weight:500;}
+
+/* ---------- search ---------- */
+#search-wrap{position:fixed; top:22px; left:50%; transform:translateX(-50%); z-index:25; pointer-events:auto;}
+#search{width:260px; background:var(--panel); border:1px solid var(--line); border-radius:20px;
+  padding:9px 16px; font-family:var(--sans); font-size:12.5px; color:var(--ink); outline:none;
+  backdrop-filter:blur(10px); transition:width .25s ease, border-color .2s ease;}
+#search:focus{width:320px; border-color:#3a4155;}
+#search::placeholder{color:var(--ink-faint);}
+#search-results{position:absolute; top:38px; left:0; right:0; background:var(--panel); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; display:none; max-height:280px; overflow-y:auto; backdrop-filter:blur(10px);}
+#search-results div{padding:9px 14px; font-size:12px; cursor:pointer; border-bottom:1px solid var(--line-soft);
+  display:flex; justify-content:space-between; gap:10px;}
+#search-results div:last-child{border-bottom:none;}
+#search-results div:hover{background:rgba(255,255,255,.05);}
+#search-results span.tag{color:var(--ink-faint); font-family:var(--mono); font-size:10px;}
+
+/* ---------- legend ---------- */
+#legend{position:fixed; left:26px; bottom:26px; z-index:20; background:var(--panel); border:1px solid var(--line);
+  border-radius:14px; padding:14px 16px; backdrop-filter:blur(10px); font-size:11.5px; min-width:190px;
+  transition:opacity .2s ease;}
+#legend h2{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-faint); margin:0 0 10px 0; font-weight:500;}
+.legend-row{display:flex; align-items:center; gap:9px; margin-bottom:7px; cursor:pointer; opacity:1; transition:opacity .15s;}
+.legend-row:last-child{margin-bottom:0;}
+.legend-row.dimmed{opacity:.35;}
+.legend-dot{width:9px; height:9px; border-radius:50%; flex:none;}
+.legend-row span{color:var(--ink-dim);}
+
+/* ---------- controls (add keyword / paper) ---------- */
+#controls{position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:22;
+  display:flex; align-items:center; gap:8px; background:var(--panel); border:1px solid var(--line);
+  border-radius:24px; padding:7px 8px 7px 18px; backdrop-filter:blur(10px); box-shadow:var(--shadow);}
+#kw-input{background:transparent; border:none; outline:none; color:var(--ink); font-family:var(--sans);
+  font-size:13px; width:240px;}
+#kw-input::placeholder{color:var(--ink-faint);}
+.btn{font-family:var(--sans); font-size:12.5px; font-weight:500; border:none; border-radius:18px; padding:9px 16px;
+  cursor:pointer; transition:transform .12s ease, opacity .15s ease; white-space:nowrap;}
+.btn:active{transform:scale(.96);}
+.btn-primary{background:var(--c-po); color:#00251c;}
+.btn-primary:hover{opacity:.9;}
+.btn-ghost{background:rgba(255,255,255,.06); color:var(--ink);}
+.btn-ghost:hover{background:rgba(255,255,255,.1);}
+.btn:disabled{opacity:.45; cursor:default;}
+#ctrl-divider{width:1px; height:20px; background:var(--line);}
+
+/* ---------- zoom controls ---------- */
+#zoom-ctl{position:fixed; right:26px; bottom:26px; z-index:20; display:flex; flex-direction:column; gap:6px;}
+#zoom-ctl button{width:34px; height:34px; border-radius:10px; border:1px solid var(--line); background:var(--panel);
+  color:var(--ink-dim); font-size:16px; cursor:pointer; backdrop-filter:blur(10px);}
+#zoom-ctl button:hover{color:var(--ink); border-color:#3a4155;}
+
+/* ---------- graph elements ---------- */
+.link{stroke:#39424f; stroke-opacity:.28; fill:none;}
+.link.hier{stroke-opacity:.4;}
+.link.dim{stroke-opacity:.04;}
+.link.hi{stroke-opacity:.85; stroke-width:1.6px;}
+.node-glow{filter:url(#soft-glow);}
+.node circle.core{stroke:rgba(0,0,0,.5); stroke-width:1px; cursor:pointer;}
+.node.dim{opacity:.18;}
+.node.hi circle.core{stroke:#fff; stroke-width:1.4px;}
+.node text.label{fill:var(--ink-dim); font-family:var(--sans); font-weight:500; pointer-events:none;
+  paint-order:stroke; stroke:#040405; stroke-width:3px; stroke-linejoin:round;}
+.node.dim text.label{display:none;}
+.node.hi text.label{fill:var(--ink);}
+.node.root text.label{fill:var(--root); font-weight:600;}
+
+/* tooltip */
+#tooltip{position:fixed; z-index:30; pointer-events:none; background:rgba(10,11,14,.95); border:1px solid var(--line);
+  border-radius:10px; padding:9px 12px; font-size:12px; max-width:240px; display:none; box-shadow:var(--shadow);}
+#tooltip .tt-title{color:var(--ink); font-weight:600; margin-bottom:3px;}
+#tooltip .tt-meta{color:var(--ink-faint); font-family:var(--mono); font-size:10.5px;}
+#tooltip .tt-desc{color:var(--ink-dim); margin-top:5px; line-height:1.4;}
+
+/* ---------- drawer ---------- */
+#drawer{position:fixed; top:0; right:0; bottom:0; width:420px; max-width:92vw; background:var(--panel);
+  border-left:1px solid var(--line); backdrop-filter:blur(16px); transform:translateX(100%);
+  transition:transform .32s cubic-bezier(.2,.8,.25,1); z-index:40; display:flex; flex-direction:column;}
+#drawer.open{transform:translateX(0);}
+#drawer-head{padding:24px 24px 16px 24px; border-bottom:1px solid var(--line-soft);}
+#drawer-close{position:absolute; top:20px; right:20px; background:none; border:none; color:var(--ink-faint);
+  font-size:18px; cursor:pointer; line-height:1; padding:4px;}
+#drawer-close:hover{color:var(--ink);}
+#drawer-cluster{font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.07em;
+  margin-bottom:8px; display:inline-block; padding:3px 9px; border-radius:20px;}
+#drawer-title{font-size:19px; font-weight:600; line-height:1.3; margin:0 0 8px 0;}
+#drawer-desc{font-size:13px; color:var(--ink-dim); line-height:1.55; margin:0;}
+#drawer-body{flex:1; overflow-y:auto; padding:16px 24px 28px 24px;}
+#drawer-body h3{font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-faint);
+  font-weight:500; margin:18px 0 10px 0;}
+#drawer-body h3:first-child{margin-top:0;}
+.paper-card{border:1px solid var(--line-soft); border-radius:12px; padding:13px 15px; margin-bottom:10px;
+  background:rgba(255,255,255,.015); transition:border-color .15s;}
+.paper-card:hover{border-color:#333c4c;}
+.paper-title{font-size:13.5px; font-weight:600; line-height:1.4; margin:0 0 5px 0; color:var(--ink);}
+.paper-meta{font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); margin-bottom:8px;}
+.paper-field{font-size:12px; color:var(--ink-dim); line-height:1.5; margin:5px 0 0 0;}
+.paper-field b{color:var(--ink); font-weight:500;}
+.paper-link{display:inline-block; margin-top:9px; font-size:11.5px; color:var(--c-po); text-decoration:none;}
+.paper-link:hover{text-decoration:underline;}
+.chip-row{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;}
+.chip{font-family:var(--mono); font-size:10px; padding:3px 8px; border-radius:12px; border:1px solid var(--line);
+  color:var(--ink-faint); cursor:pointer;}
+.chip:hover{color:var(--ink); border-color:#3a4155;}
+.empty-note{font-size:12.5px; color:var(--ink-faint); line-height:1.6; padding:6px 0;}
+.subnode-link{display:block; font-size:12.5px; color:var(--ink-dim); padding:7px 0; border-bottom:1px solid var(--line-soft);
+  cursor:pointer;}
+.subnode-link:hover{color:var(--ink);}
+.subnode-link .n{font-family:var(--mono); font-size:10px; color:var(--ink-faint); float:right;}
+
+/* ---------- modal (add paper) ---------- */
+.modal-veil{position:fixed; inset:0; background:rgba(2,2,3,.7); backdrop-filter:blur(4px); z-index:60;
+  display:none; align-items:center; justify-content:center;}
+.modal-veil.open{display:flex;}
+.modal{width:520px; max-width:92vw; max-height:86vh; overflow-y:auto; background:#0b0d12; border:1px solid var(--line);
+  border-radius:18px; padding:26px 28px; box-shadow:var(--shadow);}
+.modal h2{font-size:16px; margin:0 0 4px 0; font-weight:600;}
+.modal .sub{font-size:12px; color:var(--ink-dim); margin:0 0 18px 0; line-height:1.5;}
+.field{margin-bottom:13px;}
+.field label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint);
+  margin-bottom:6px;}
+.field input, .field textarea, .field select{width:100%; background:#141821; border:1px solid var(--line);
+  border-radius:9px; padding:9px 11px; color:var(--ink); font-family:var(--sans); font-size:13px; outline:none;
+  resize:vertical;}
+.field input:focus, .field textarea:focus, .field select:focus{border-color:#3a4155;}
+.field-row{display:flex; gap:10px;}
+.field-row > .field{flex:1;}
+.modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:18px;}
+#pick-list{max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:9px; padding:8px 10px;
+  display:none;}
+.pick-item{display:flex; align-items:center; gap:8px; padding:5px 2px; font-size:12.5px; color:var(--ink-dim);}
+.pick-item input{width:auto;}
+#ai-status{font-size:11.5px; color:var(--ink-faint); margin-top:10px; min-height:16px;}
+
+/* ---------- loading ---------- */
+#loading{position:fixed; inset:0; z-index:100; background:var(--bg); display:flex; align-items:center;
+  justify-content:center; flex-direction:column; gap:14px; transition:opacity .4s ease;}
+#loading.hide{opacity:0; pointer-events:none;}
+.pulse{width:14px; height:14px; border-radius:50%; background:var(--c-po); animation:pulse 1.4s ease-in-out infinite;}
+@keyframes pulse{0%,100%{transform:scale(1); opacity:1;} 50%{transform:scale(1.7); opacity:.4;}}
+#loading p{font-family:var(--mono); font-size:12px; color:var(--ink-faint);}
+
+/* ---------- toast ---------- */
+#toast{position:fixed; top:72px; left:50%; transform:translateX(-50%) translateY(-8px); z-index:70;
+  background:#0b0d12; border:1px solid var(--line); border-radius:11px; padding:10px 16px; font-size:12.5px;
+  color:var(--ink-dim); opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;}
+#toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+@media (max-width:720px){
+  #hdr{flex-direction:column;}
+  #stats{text-align:left;}
+  #search-wrap{top:auto; bottom:88px; left:16px; right:16px; transform:none;}
+  #search{width:100%;}
+  #search:focus{width:100%;}
+  #legend{display:none;}
+  #controls{left:16px; right:16px; transform:none; bottom:16px;}
+  #kw-input{width:100%;}
+  #drawer{width:100%; max-width:100%;}
+}
+@media (prefers-reduced-motion: reduce){
+  .pulse{animation:none;}
+  #drawer{transition:none;}
+}
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="pulse"></div><p id="loading-msg">loading literature map…</p></div>
+
+<div id="stage">
+  <svg>
+    <defs>
+      <filter id="soft-glow" x="-120%" y="-120%" width="340%" height="340%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+    <g id="viewport">
+      <g id="layer-links"></g>
+      <g id="layer-nodes"></g>
+    </g>
+  </svg>
+</div>
+
+<div id="hdr">
+  <div class="titles">
+    <h1>Parrot Optimizer — Planar Steel Frame Literature Map</h1>
+    <p>Every node is a concept; every line is a real connection through the papers below. Hover to trace links, click to read, drag to rearrange.</p>
+  </div>
+  <div style="text-align:right;">
+    <div id="stats"></div>
+    <span id="sync-badge" style="display:none; font-family:var(--mono); font-size:10.5px; color:var(--c-po); margin-top:4px;">● live sync</span>
+  </div>
+</div>
+
+<div id="search-wrap">
+  <input id="search" type="text" placeholder="Find a keyword…" autocomplete="off">
+  <div id="search-results"></div>
+</div>
+
+<div id="legend"></div>
+
+<div id="controls">
+  <input id="kw-input" type="text" placeholder="Add a keyword or concept…" autocomplete="off">
+  <button class="btn btn-primary" id="btn-add-kw">Place it</button>
+  <div id="ctrl-divider"></div>
+  <button class="btn btn-ghost" id="btn-add-paper">+ Paper</button>
+</div>
+
+<div id="zoom-ctl">
+  <button id="zoom-in" title="Zoom in">+</button>
+  <button id="zoom-out" title="Zoom out">–</button>
+  <button id="zoom-reset" title="Reset view">⤾</button>
+</div>
+
+<div id="tooltip"></div>
+<div id="toast"></div>
+
+<div id="drawer">
+  <button id="drawer-close">✕</button>
+  <div id="drawer-head">
+    <span id="drawer-cluster"></span>
+    <h2 id="drawer-title"></h2>
+    <p id="drawer-desc"></p>
+  </div>
+  <div id="drawer-body"></div>
+</div>
+
+<div class="modal-veil" id="veil-paper">
+  <div class="modal">
+    <h2>Add a research paper</h2>
+    <p class="sub">Fill in what you have — even just a title and link is fine. If AI placement is available, we'll suggest which keywords it belongs to; otherwise you can pick them yourself.</p>
+    <div class="field"><label>Title *</label><input id="p-title" type="text" placeholder="e.g. Grey Wolf Optimizer"></div>
+    <div class="field-row">
+      <div class="field"><label>Author(s)</label><input id="p-authors" type="text" placeholder="Mirjalili, S. et al."></div>
+      <div class="field" style="max-width:110px;"><label>Year</label><input id="p-year" type="text" placeholder="2024"></div>
+    </div>
+    <div class="field"><label>Journal / Venue</label><input id="p-journal" type="text" placeholder="Advances in Engineering Software"></div>
+    <div class="field"><label>Link / DOI</label><input id="p-link" type="text" placeholder="https://doi.org/…"></div>
+    <div class="field"><label>Objective / abstract (helps AI placement)</label><textarea id="p-abstract" rows="3" placeholder="What the paper set out to do…"></textarea></div>
+    <div class="field"><label>Key findings (optional)</label><textarea id="p-findings" rows="2" placeholder="What they found…"></textarea></div>
+    <div id="pick-list"></div>
+    <div id="ai-status"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="p-cancel">Cancel</button>
+      <button class="btn btn-primary" id="p-save">Add paper</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   DATA — clusters, nodes, hierarchy edges, papers
+   ============================================================ */
+const CLUSTERS = [
+  {id:'po',      name:'Parrot Optimizer',                 color:'var(--c-po)'},
+  {id:'thesis',  name:'This Research Program',             color:'var(--c-thesis)'},
+  {id:'prob', name:'Structural Optimization Problems',  color:'var(--c-problem)'},
+  {id:'swarm',   name:'Swarm-Intelligence Algorithms',     color:'var(--c-swarm)'},
+  {id:'evo',     name:'Evolutionary & Physics-Based',      color:'var(--c-evo)'},
+  {id:'theory',  name:'Theoretical Foundations',           color:'var(--c-theory)'},
+  {id:'rev',  name:'Comparative & Review Studies',      color:'var(--c-review)'},
+];
+
+const NODES = [
+  {id:'root', label:'Parrot Optimizer for Planar Steel Frames', type:'root', cluster:null,
+    desc:'The centre of this map: applying the Parrot Optimizer metaheuristic to the weight-minimization design of 2D (planar) steel moment frames under AISC 360-99.'},
+
+  // Parrot Optimizer cluster
+  {id:'po_hub', label:'Parrot Optimizer (PO)', type:'cluster', cluster:'po',
+    desc:'A 2024 population-based metaheuristic by Lian et al., inspired by four behaviors of trained Pyrrhura molinae parrots. The algorithm this whole thesis program is built around.'},
+  {id:'po_foraging', label:'Foraging Behavior', type:'topic', cluster:'po',
+    desc:'Parrots search in small groups guided by the owner\'s location, group presence, and smell/visual cues — modeled as one of PO\'s four search behaviors.'},
+  {id:'po_staying', label:'Staying Behavior', type:'topic', cluster:'po',
+    desc:'Sudden flight toward the "owner" position, using a Lévy-flight step — the exploitation-leaning behavior in PO.'},
+  {id:'po_communicating', label:'Communicating Behavior', type:'topic', cluster:'po',
+    desc:'Movement toward (or briefly away from) the flock\'s mean position, modeling parrots\' distinct social calls.'},
+  {id:'po_fear', label:'Fear of Strangers Behavior', type:'topic', cluster:'po',
+    desc:'Caution around unfamiliar situations that pulls a "parrot" back toward safety — PO\'s stability-preserving behavior.'},
+  {id:'po_mopo', label:'Multi-Objective PO (MOPO)', type:'topic', cluster:'po',
+    desc:'A Pareto-archive extension of PO for problems with more than one objective.'},
+  {id:'po_stpo', label:'Multi-Strategy Enhanced PO (STPO)', type:'topic', cluster:'po',
+    desc:'Adds an alert-protection mechanism, experience exchange, and a perturbation operator to fix PO\'s slow high-dimensional convergence.'},
+  {id:'po_sncpo', label:'Salp-Competitive PO (SNCPO)', type:'topic', cluster:'po',
+    desc:'Hybridizes PO with Competitive Swarm Optimization and the Salp Swarm Algorithm to rebalance exploration vs. exploitation.'},
+
+  // Thesis program cluster
+  {id:'thesis_hub', label:'USC PO Research Program', type:'cluster', cluster:'thesis',
+    desc:'Four linked undergraduate/graduate theses at USC Civil Engineering, all applying the Parrot Optimizer to planar structures, under Engr. Quidilla\'s original proposal.'},
+  {id:'thesis_quidilla', label:'Quidilla — PO for Trusses & Frames', type:'topic', cluster:'thesis',
+    desc:'The MS proposal this whole program grew from: applying PO to both planar trusses and planar frames, benchmarked against GA, PSO and GWO.'},
+  {id:'thesis_mirafuentes', label:'Mirafuentes — PO for Planar Trusses', type:'topic', cluster:'thesis',
+    desc:'Sibling undergraduate thesis evaluating PO specifically on benchmark and real-life planar truss problems.'},
+  {id:'thesis_thisstudy', label:'This Thesis — PO for Planar Steel Moment Frames', type:'topic', cluster:'thesis',
+    desc:'Your thesis: weight minimization / design optimization of 2D steel moment frames using PO, evaluated under AISC 360-99.'},
+  {id:'thesis_spacetruss', label:'4th Group — PO for 3D / Space Trusses', type:'topic', cluster:'thesis',
+    desc:'The fourth thesis under the same proposal, extending PO to three-dimensional space trusses.'},
+
+  // Structural optimization problem types
+  {id:'prob_hub', label:'Structural Optimization Problems', type:'cluster', cluster:'prob',
+    desc:'The design-optimization problem types that metaheuristics like PO are actually applied to in structural engineering.'},
+  {id:'prob_size', label:'Size Optimization', type:'topic', cluster:'prob',
+    desc:'Choosing member cross-sections (e.g. AISC W-shapes) to minimize weight while satisfying design constraints.'},
+  {id:'prob_shape', label:'Shape Optimization', type:'topic', cluster:'prob',
+    desc:'Adjusting nodal geometry/coordinates of a structure to improve performance.'},
+  {id:'prob_topology', label:'Topology Optimization', type:'topic', cluster:'prob',
+    desc:'Deciding which members should exist at all within a design domain.'},
+  {id:'prob_discrete', label:'Discrete-Variable Optimization', type:'topic', cluster:'prob',
+    desc:'Optimization where variables must come from a finite catalog (standard steel sections) rather than any real number.'},
+  {id:'prob_weight', label:'Weight Minimization', type:'topic', cluster:'prob',
+    desc:'The most common objective function in structural metaheuristic studies — least steel weight subject to code checks.'},
+  {id:'prob_frame', label:'Steel Frame / Moment Frame Design', type:'topic', cluster:'prob',
+    desc:'The specific structural system this thesis targets — planar moment-resisting steel frames.'},
+  {id:'prob_truss', label:'Steel Truss Design', type:'topic', cluster:'prob',
+    desc:'Pin-connected axial-member structures — the most heavily studied testbed for new metaheuristics.'},
+  {id:'prob_aisc', label:'AISC 360 Code Constraints', type:'topic', cluster:'prob',
+    desc:'US steel design specification used to check strength/stability — the constraint set this thesis designs against (AISC 360-99).'},
+  {id:'prob_seismic', label:'Seismic Code Constraints (SNI / AISC 341)', type:'topic', cluster:'prob',
+    desc:'Lateral/seismic design provisions layered on top of gravity design in several comparative studies.'},
+  {id:'prob_constrainthandling', label:'Constraint-Handling Techniques', type:'topic', cluster:'prob',
+    desc:'How infeasible candidate designs (stress, displacement, code violations) are penalized or repaired during optimization.'},
+
+  // Swarm intelligence
+  {id:'swarm_hub', label:'Swarm-Intelligence Algorithms', type:'cluster', cluster:'swarm',
+    desc:'Metaheuristics modeled on collective animal behavior — the family PO itself belongs to, and the main comparison pool for this thesis.'},
+  {id:'swarm_pso', label:'Particle Swarm Optimization (PSO)', type:'topic', cluster:'swarm',
+    desc:'Kennedy & Eberhart\'s 1995 algorithm modeling social flocking — one of the three benchmark algorithms named in Mirafuentes\' proposal.'},
+  {id:'swarm_aco', label:'Ant Colony Optimization (ACO)', type:'topic', cluster:'swarm',
+    desc:'Pheromone-trail-based optimization inspired by foraging ants.'},
+  {id:'swarm_gwo', label:'Grey Wolf Optimizer (GWO)', type:'topic', cluster:'swarm',
+    desc:'Mirjalili et al.\'s 2014 algorithm modeling wolf-pack hunting hierarchy — the third benchmark algorithm in Mirafuentes\' proposal.'},
+  {id:'swarm_woa', label:'Whale Optimization Algorithm (WOA)', type:'topic', cluster:'swarm',
+    desc:'Mirjalili & Lewis\' 2016 algorithm modeling humpback-whale bubble-net hunting.'},
+  {id:'swarm_cuckoo', label:'Cuckoo Search', type:'topic', cluster:'swarm',
+    desc:'Metaheuristic based on brood parasitism and Lévy-flight search steps.'},
+  {id:'swarm_mba', label:'Mine Blast Algorithm', type:'topic', cluster:'swarm',
+    desc:'Physics-inspired algorithm modeling shrapnel dispersion from a mine explosion — applied directly to discrete truss sizing.'},
+  {id:'swarm_sos', label:'Symbiotic Organisms Search (SOS)', type:'topic', cluster:'swarm',
+    desc:'Models mutualism, commensalism and parasitism between organisms; notably parameter-free.'},
+  {id:'swarm_gsa', label:'Gravitational Search Algorithm', type:'topic', cluster:'swarm',
+    desc:'Agents treated as masses that attract each other by simulated gravity.'},
+  {id:'swarm_levy', label:'Lévy Flight Mechanism', type:'topic', cluster:'swarm',
+    desc:'A heavy-tailed random-walk step pattern (from foraging-animal studies) used inside PO\'s Staying behavior and several GWO/WOA variants to escape local optima.'},
+
+  // Evolutionary / physics-based
+  {id:'evo_hub', label:'Evolutionary & Physics-Based Algorithms', type:'cluster', cluster:'evo',
+    desc:'Classical and physics-inspired metaheuristics that predate the swarm-intelligence wave and remain common comparison baselines.'},
+  {id:'evo_ga', label:'Genetic Algorithm (GA)', type:'topic', cluster:'evo',
+    desc:'Selection–crossover–mutation search modeled on natural evolution — the oldest and most widely benchmarked metaheuristic in structural optimization.'},
+  {id:'evo_de', label:'Differential Evolution (DE)', type:'topic', cluster:'evo',
+    desc:'Storn & Price\'s vector-difference mutation scheme for continuous global optimization.'},
+  {id:'evo_sa', label:'Simulated Annealing', type:'topic', cluster:'evo',
+    desc:'Probabilistic search modeled on metal annealing, allowing uphill moves that cool over time.'},
+  {id:'evo_tabu', label:'Tabu Search', type:'topic', cluster:'evo',
+    desc:'Local search that forbids revisiting recently explored solutions to escape cycles.'},
+  {id:'evo_hs', label:'Harmony Search', type:'topic', cluster:'evo',
+    desc:'Metaheuristic modeled on musicians improvising toward a pleasing harmony — a strong performer on discrete structural problems.'},
+  {id:'evo_bbbc', label:'Big Bang – Big Crunch', type:'topic', cluster:'evo',
+    desc:'Alternates a random "explosion" phase with a convergent "contraction" phase toward a center of mass.'},
+
+  // Theory
+  {id:'theory_hub', label:'Theoretical Foundations', type:'cluster', cluster:'theory',
+    desc:'The underlying theory that explains why no single metaheuristic wins every problem, and how these algorithms are formally studied.'},
+  {id:'theory_nfl', label:'No Free Lunch Theorem', type:'topic', cluster:'theory',
+    desc:'Wolpert & Macready\'s 1997 result: averaged over all possible problems, no optimization algorithm is universally superior — the theoretical justification for testing PO on structural frames at all.'},
+  {id:'theory_metadesign', label:'Metaheuristic Design Framework', type:'topic', cluster:'theory',
+    desc:'The general taxonomy and design principles (exploration vs. exploitation, population vs. trajectory methods) that any new metaheuristic — including PO — is positioned against.'},
+  {id:'theory_repair', label:'Repair / Constraint-Handling Theory', type:'topic', cluster:'theory',
+    desc:'Formal survey of penalty and repair strategies for keeping evolutionary/swarm search inside feasible design space.'},
+  {id:'theory_effectivelength', label:'Effective Length Factors (Frame Stability)', type:'topic', cluster:'theory',
+    desc:'Classical structural-stability theory (K-factors for braced/unbraced frames) needed to check any candidate frame design against AISC.'},
+
+  // Reviews / comparative studies
+  {id:'rev_hub', label:'Comparative & Review Studies', type:'cluster', cluster:'rev',
+    desc:'Studies that don\'t propose a new algorithm, but benchmark several against each other — the most directly useful papers for choosing what PO should be compared against.'},
+  {id:'rev_alberdi', label:'Robustness Benchmark: Steel Frames', type:'topic', cluster:'rev',
+    desc:'Alberdi & Khandelwal (2015) — the exact 3-bay and 5-bay/14-story planar frame benchmarks Quidilla\'s proposal reuses for PO testing.'},
+  {id:'rev_charalampakis', label:'Truss Weight-Minimization Benchmark', type:'topic', cluster:'rev',
+    desc:'Charalampakis & Tsiatas (2019) — critical, absolute (not just relative) comparison of GA/PSO/ABC/DE/SA on classic truss sizing problems.'},
+  {id:'rev_prayogo2022', label:'SNI Steel Frame Comparative Study', type:'topic', cluster:'rev',
+    desc:'Prayogo et al. (2022) — PSO vs. DE vs. SOS for layout/topology/size optimization of seismic-resistant steel frames under Indonesian code (SNI).'},
+  {id:'rev_aiinstructural', label:'AI in Structural Engineering (survey)', type:'topic', cluster:'rev',
+    desc:'Salehi & Burgueño (2018) — broader survey of where machine learning and AI methods are entering structural engineering practice.'},
+];
+
+// hierarchy edges only — root>cluster, cluster>topic. Topic-topic links are
+// generated automatically below from shared paper tags (co-citation style).
+const HIER_EDGES = [
+  ...CLUSTERS.map(c => ['root', c.id + '_hub']),
+  ...NODES.filter(n => n.type === 'topic').map(n => [n.cluster + '_hub', n.id]),
+];
+// strong hand-picked link between "your thesis" and the root
+HIER_EDGES.push(['root', 'thesis_thisstudy']);
+
+/* ============================================================
+   PAPERS — 50 entries. Every citation below comes straight from
+   Quidilla's MS proposal, Mirafuentes' proposal, papers in this
+   Project's files, or a verified web search — nothing invented.
+   ============================================================ */
+const PAPERS = [
+{id:'lian2024', title:'Parrot Optimizer: Algorithm and Applications to Medical Problems', authors:'Lian, J., Hui, G., Ma, L., Zhu, T., Wu, X., Heidari, A.A., Chen, Y., & Chen, H.', year:2024, journal:'Computers in Biology and Medicine, 172, 108064', objective:'Introduce PO, a population-based metaheuristic inspired by four behaviors of trained Pyrrhura molinae parrots.', methods:'35 benchmark functions incl. IEEE CEC2022; comparison vs. established metaheuristics; applied to medical optimization problems.', findings:'PO converges faster and finds better solutions than classical algorithms across most benchmarks.', notes:'The foundational PO paper — the algorithm this entire thesis program is built on.', link:'https://doi.org/10.1016/j.compbiomed.2024.108064', nodeIds:['po_hub','po_foraging','po_staying','po_communicating','po_fear']},
+{id:'saad2025', title:'An Efficient Multi-Objective Parrot Optimizer for Global and Engineering Optimization Problems', authors:'Saad, M.R., Emam, M.M., & Houssein, E.H.', year:2025, journal:'Scientific Reports, 15', objective:'Extend PO into a Multi-Objective Parrot Optimizer (MOPO) using an outward Pareto archive.', methods:'CEC\'2020 multi-objective benchmark suite; 4 constrained engineering problems; real-world helical-spring design; compared to 7 SOTA multi-objective algorithms.', findings:'MOPO outperforms recent multi-objective GWO, WOA and manta-ray/gorilla variants on benchmark and real design problems.', notes:'', link:'https://doi.org/10.1038/s41598-025-88740-8', nodeIds:['po_mopo']},
+{id:'jian2026', title:'Research on a Multi-Strategy Enhanced Parrot Optimization Algorithm STPO for Complex Optimization Problems and Its Applications', authors:'Jian, M., Wu, G., & Xiao, B.', year:2026, journal:'Scientific Reports', objective:'Fix PO\'s slow convergence and local-optima trapping in high-dimensional problems.', methods:'Sparrow-inspired alert-protection mechanism, experience-exchange strategy, worst-guided differential perturbation; CEC2017/CEC2022 benchmark suites.', findings:'STPO achieves top average rankings against 12 competing algorithms.', notes:'', link:'https://doi.org/10.1038/s41598-026-53263-3', nodeIds:['po_stpo']},
+{id:'adegboye2025', title:'Salp Navigation and Competitive Based Parrot Optimizer (SNCPO) for Efficient Extreme Learning Machine Training and Global Numerical Optimization', authors:'Adegboye, O.R., Feda, A.K., Tejani, G.G., & Smerat, A. et al.', year:2025, journal:'Scientific Reports', objective:'Hybridize PO with Competitive Swarm Optimization and the Salp Swarm Algorithm to rebalance exploration and exploitation.', methods:'CEC2015/CEC2020 benchmarks; 4 engineering design problems; ELM training across 14 datasets.', findings:'SNCPO consistently outperforms SOTA on convergence speed, solution quality and robustness.', notes:'', link:'https://doi.org/10.1038/s41598-025-97661-5', nodeIds:['po_sncpo']},
+{id:'alberdi2015', title:'Comparison of Robustness of Metaheuristic Algorithms for Steel Frame Optimization', authors:'Alberdi, R., & Khandelwal, K.', year:2015, journal:'Engineering Structures, 102, 40–60', objective:'Measure algorithmic robustness — consistently reaching the global optimum at low cost — for 6 metaheuristics on steel frame optimization.', methods:'Ant colony, GA, harmony search, PSO, simulated annealing and tabu search tested on 5 benchmark moment/braced frame problems.', findings:'No algorithm wins every case; tabu search and harmony search gave the lightest, most robust designs overall, plain PSO produced no feasible results.', notes:'The exact 3-bay and 5-bay/14-story frame benchmarks reused in Quidilla\'s PO proposal.', link:'https://doi.org/10.1016/j.engstruct.2015.08.012', nodeIds:['rev_alberdi','prob_frame','prob_aisc','swarm_pso','swarm_aco','evo_hs','evo_sa','evo_tabu','evo_ga']},
+{id:'kennedy1995', title:'Particle Swarm Optimization', authors:'Kennedy, J., & Eberhart, R.', year:1995, journal:'Proc. IEEE International Conference on Neural Networks, 4, 1942–1948', objective:'Introduce PSO as a simple, socially-inspired optimizer.', methods:'Trained a neural network and benchmarked against the Schaffer f6 function versus genetic algorithms.', findings:'PSO reliably found the global optimum and trained networks competitively with backpropagation.', notes:'One of the three baseline algorithms named in Mirafuentes\' PO proposal.', link:'https://doi.org/10.1109/ICNN.1995.488968', nodeIds:['swarm_pso']},
+{id:'mirjalili2014', title:'Grey Wolf Optimizer', authors:'Mirjalili, S., Mirjalili, S.M., & Lewis, A.', year:2014, journal:'Advances in Engineering Software, 69, 46–61', objective:'Introduce GWO, modeling the leadership hierarchy and hunting behavior of grey wolves.', methods:'29 benchmark functions and 3 classic engineering design problems (incl. welded beam design).', findings:'GWO shows competitive exploration/exploitation balance versus PSO, GSA and DE.', notes:'One of the three baseline algorithms named in Mirafuentes\' PO proposal.', link:'https://doi.org/10.1016/j.advengsoft.2013.12.007', nodeIds:['swarm_gwo']},
+{id:'mirjalili2016', title:'The Whale Optimization Algorithm', authors:'Mirjalili, S., & Lewis, A.', year:2016, journal:'Advances in Engineering Software, 95, 51–67', objective:'Introduce WOA, modeling humpback whale bubble-net hunting.', methods:'29 mathematical benchmark functions and 6 structural engineering design problems.', findings:'WOA is competitive with GA, PSO and GSA and highly effective on constrained design problems.', notes:'', link:'https://doi.org/10.1016/j.advengsoft.2016.01.008', nodeIds:['swarm_woa']},
+{id:'heidari2017', title:'An Efficient Modified Grey Wolf Optimizer with Lévy Flight for Optimization Tasks', authors:'Heidari, A.A., & Pahlavani, P.', year:2017, journal:'Applied Soft Computing, 60, 115–134', objective:'Improve GWO\'s local-optima escape using Lévy-flight-based random walks.', methods:'Standard and CEC benchmark suites, statistical convergence analysis.', findings:'The Lévy-flight modification substantially improves exploration and convergence stability over standard GWO.', notes:'', link:'https://doi.org/10.1016/j.asoc.2017.06.044', nodeIds:['swarm_gwo','swarm_levy']},
+{id:'zhang2015', title:'Grey Wolf Optimizer Based on Powell Local Optimization Method for Clustering Analysis', authors:'Zhang, S., & Zhou, Y.', year:2015, journal:'Discrete Dynamics in Nature and Society, 2015', objective:'Hybridize GWO with Powell\'s local search to improve clustering-analysis performance.', methods:'Benchmark clustering datasets compared against standard GWO and other clustering heuristics.', findings:'The hybrid improves clustering accuracy and convergence speed.', notes:'', link:'https://doi.org/10.1155/2015/481360', nodeIds:['swarm_gwo']},
+{id:'long2018', title:'Inspired Grey Wolf Optimizer for Solving Large-Scale Function Optimization Problems', authors:'Long, W., Jiao, J., Liang, X., & Tang, M.', year:2018, journal:'Applied Mathematical Modelling, 60, 112–126', objective:'Extend GWO to remain effective on large-scale (high-dimensional) optimization problems.', methods:'Large-scale CEC benchmark functions vs. standard GWO and other large-scale optimizers.', findings:'The inspired variant scales substantially better to high dimensions than standard GWO.', notes:'', link:'https://doi.org/10.1016/j.apm.2018.03.005', nodeIds:['swarm_gwo']},
+{id:'gupta2018', title:'A Novel Random Walk Grey Wolf Optimizer', authors:'Gupta, S., & Deep, K.', year:2018, journal:'Swarm and Evolutionary Computation', objective:'Introduce a random-walk mechanism into GWO to strengthen exploration.', methods:'Standard and CEC 2014 benchmark suites plus engineering design problems.', findings:'Random-walk GWO improves diversity and avoids premature convergence versus standard GWO.', notes:'', link:'', nodeIds:['swarm_gwo','swarm_levy']},
+{id:'yang2017', title:'Grouped Grey Wolf Optimizer for Maximum Power Point Tracking of Doubly-Fed Induction Generator Based Wind Turbine', authors:'Yang, B., Zhang, X., Yu, T., Shu, H., & Fang, Z.', year:2017, journal:'Energy Conversion and Management', objective:'Apply a grouped GWO variant to a real engineering control problem outside structural design.', methods:'Wind-turbine MPPT simulation compared against standard GWO and PSO controllers.', findings:'Grouped GWO tracks the maximum power point faster and more accurately.', notes:'Shows GWO variants generalizing well beyond structural problems.', link:'', nodeIds:['swarm_gwo']},
+{id:'brodzicki2021', title:'The Whale Optimization Algorithm Approach for Deep Neural Networks', authors:'Brodzicki, A., Piekarski, M., & Jaworek-Korjakowska, J.', year:2021, journal:'Sensors, 21(23), 8003', objective:'Use WOA to tune deep neural network hyperparameters.', methods:'Benchmark image classification tasks with WOA-tuned CNNs vs. standard tuning.', findings:'WOA-based tuning improves network accuracy while reducing manual tuning effort.', notes:'', link:'https://doi.org/10.3390/s21238003', nodeIds:['swarm_woa']},
+{id:'jiang2021', title:'An Improved Whale Algorithm and Its Application in Truss Optimization', authors:'Jiang, F., Wang, L., & Bai, L.', year:2021, journal:'Journal of Bionic Engineering, 18(3), 721–732', objective:'Improve WOA and apply it directly to truss sizing optimization.', methods:'Classic benchmark trusses compared against standard WOA, GA and PSO.', findings:'The improved WOA finds lighter, more consistent truss designs.', notes:'', link:'https://doi.org/10.1007/s42235-021-0041-z', nodeIds:['swarm_woa','prob_truss']},
+{id:'wei2025', title:'LSWOA: An Enhanced Whale Optimization Algorithm with Lévy Flight and Spiral Flight for Numerical and Engineering Design Optimization Problems', authors:'Wei, J., Gu, Y., Xie, Z., Yan, Y., Lu, B., Li, Z., Cheong, N., Zhang, J., & Zhang, S.', year:2025, journal:'PLOS One, 20(9), e322058', objective:'Combine Lévy-flight and spiral-flight steps to improve WOA on numerical and engineering problems.', methods:'CEC benchmark suites and classic engineering design problems.', findings:'LSWOA outperforms standard WOA and several other recent metaheuristics.', notes:'', link:'https://doi.org/10.1371/journal.pone.0322058', nodeIds:['swarm_woa','swarm_levy']},
+{id:'yuan2020', title:'Multi-Strategy Ensemble Whale Optimization Algorithm and Its Application to Analog Circuits Intelligent Fault Diagnosis', authors:'Yuan, X., Miao, Z., Liu, Z., Yan, Z., & Zhou, F.', year:2020, journal:'Applied Sciences, 10(11), 3667', objective:'Ensemble multiple search strategies within WOA for a real diagnostic application.', methods:'Analog-circuit fault datasets, compared against standard WOA and other classifiers.', findings:'The ensemble WOA improves diagnostic accuracy and convergence stability.', notes:'', link:'https://doi.org/10.3390/app10113667', nodeIds:['swarm_woa']},
+{id:'cazacu2014', title:'Steel Truss Optimization Using Genetic Algorithms and FEA', authors:'Cazacu, R., & Grama, L.', year:2014, journal:'Procedia Technology', objective:'Combine GA with finite-element analysis to optimize steel truss designs.', methods:'GA-driven design loop with FEA-based structural verification.', findings:'GA+FEA reliably converges to lighter, code-compliant truss designs.', notes:'', link:'https://doi.org/10.1016/j.protcy.2013.12.496', nodeIds:['evo_ga','prob_truss']},
+{id:'frans2014', title:'Sizing, Shape, and Topology Optimizations of Roof Trusses Using Hybrid Genetic Algorithms', authors:'Frans, R., & Arfiadi, Y.', year:2014, journal:'Procedia Engineering, 95, 185–195', objective:'Jointly optimize sizing, shape and topology of roof trusses with a hybrid GA.', methods:'Hybrid GA tested on roof-truss case studies against separate single-purpose optimizations.', findings:'Joint optimization of all three problem types together yields lighter designs than optimizing them separately.', notes:'', link:'https://doi.org/10.1016/j.proeng.2014.12.178', nodeIds:['evo_ga','prob_size','prob_shape','prob_topology','prob_truss']},
+{id:'li2009', title:'A Heuristic Particle Swarm Optimization Method for Truss Structures with Discrete Variables', authors:'Li, L.J., Huang, Z.B., & Liu, F.', year:2009, journal:'Computers & Structures, 87, 435–443', objective:'Adapt PSO for discrete-variable truss sizing.', methods:'Benchmark discrete truss problems compared against GA and standard PSO.', findings:'The heuristic PSO variant is competitive with GA and converges efficiently on discrete design spaces.', notes:'', link:'https://doi.org/10.1016/j.compstruc.2009.01.004', nodeIds:['swarm_pso','prob_truss','prob_discrete']},
+{id:'nasrollahi2017', title:'Optimum Shape of Large-Span Trusses According to AISC-LRFD Using Ranked Particles Optimization', authors:'Nasrollahi, A.', year:2017, journal:'Journal of Constructional Steel Research, 134, 92–101', objective:'Shape-optimize large-span trusses under AISC-LRFD constraints using a PSO variant.', methods:'Ranked Particles Optimization applied to large-span truss case studies under code constraints.', findings:'The method finds lighter large-span truss shapes while remaining AISC-compliant.', notes:'', link:'https://doi.org/10.1016/j.jcsr.2017.03.021', nodeIds:['swarm_pso','prob_truss','prob_aisc','prob_shape']},
+{id:'kaveh2009jcsr', title:'A Particle Swarm Ant Colony Optimization for Truss Structures with Discrete Variables', authors:'Kaveh, A., & Talatahari, S.', year:2009, journal:'Journal of Constructional Steel Research, 65(8–9), 1558–1568', objective:'Hybridize PSO with ACO for discrete truss sizing.', methods:'Classic discrete truss benchmarks compared against standalone PSO and ACO.', findings:'The hybrid PSACO outperforms either algorithm alone on convergence and final weight.', notes:'', link:'https://doi.org/10.1016/j.jcsr.2009.04.021', nodeIds:['swarm_pso','swarm_aco','prob_truss','prob_discrete']},
+{id:'kaveh2009cs', title:'Particle Swarm Optimizer, Ant Colony Strategy and Harmony Search Scheme Hybridized for Optimization of Truss Structures', authors:'Kaveh, A., & Talatahari, S.', year:2009, journal:'Computers & Structures, 87(5–6), 267–283', objective:'Combine three metaheuristics — PSO, ACO and harmony search — into one hybrid scheme for truss optimization.', methods:'Benchmark truss problems compared against each parent algorithm individually.', findings:'The three-way hybrid outperforms any single parent algorithm on solution quality and consistency.', notes:'', link:'https://doi.org/10.1016/j.compstruc.2009.01.003', nodeIds:['swarm_pso','swarm_aco','evo_hs','prob_truss']},
+{id:'kaveh2009bbbc', title:'Size Optimization of Space Trusses Using Big Bang–Big Crunch Algorithm', authors:'Kaveh, A., & Talatahari, S.', year:2009, journal:'Computers & Structures, 87(17–18), 1129–1140', objective:'Apply the Big Bang–Big Crunch algorithm to space-truss size optimization.', methods:'Classic space-truss benchmarks compared against GA and PSO results.', findings:'BB-BC converges faster with fewer control parameters than GA or PSO on these problems.', notes:'', link:'https://doi.org/10.1016/j.compstruc.2009.04.011', nodeIds:['evo_bbbc','prob_truss','prob_size']},
+{id:'kaveh2008', title:'A Discrete Particle Swarm Ant Colony Optimization for Design of Steel Frames', authors:'Kaveh, A., & Talatahari, S.', year:2008, journal:'Asian Journal of Civil Engineering, 9(6), 563–575', objective:'Extend the PSO–ACO hybrid to discrete steel frame design.', methods:'Benchmark steel frame case studies with discrete section catalogs.', findings:'The hybrid finds lighter, code-compliant frame designs than either PSO or ACO alone.', notes:'', link:'', nodeIds:['swarm_pso','swarm_aco','prob_frame','prob_discrete']},
+{id:'sadollah2012', title:'Mine Blast Algorithm for Optimization of Truss Structures with Discrete Variables', authors:'Sadollah, A., Bahreininejad, A., Eskandar, H., & Hamdi, M.', year:2012, journal:'Computers & Structures, 102–103, 49–63', objective:'Introduce the physics-inspired Mine Blast Algorithm and apply it to discrete truss sizing.', methods:'Classic discrete truss benchmarks compared against GA, PSO, harmony search and others.', findings:'MBA is competitive with or better than existing metaheuristics on standard truss benchmarks.', notes:'', link:'https://doi.org/10.1016/j.compstruc.2012.03.013', nodeIds:['swarm_mba','prob_truss','prob_discrete']},
+{id:'khatibinia2018', title:'Accelerated Multi-Gravitational Search Algorithm for Size Optimization of Truss Structures', authors:'Khatibinia, M., & Yazdani, H.', year:2018, journal:'Swarm and Evolutionary Computation, 38, 109–119', objective:'Accelerate the Gravitational Search Algorithm for truss size optimization.', methods:'Benchmark truss sizing problems compared against standard GSA and other metaheuristics.', findings:'The accelerated multi-GSA converges faster while finding equal or lighter designs.', notes:'', link:'https://doi.org/10.1016/j.swevo.2017.07.001', nodeIds:['swarm_gsa','prob_truss','prob_size']},
+{id:'khatibinia2014', title:'Truss Optimization on Shape and Sizing with Frequency Constraints Based on Orthogonal Multi-Gravitational Search Algorithm', authors:'Khatibinia, M., & Naseralavi, S.', year:2014, journal:'Journal of Sound and Vibration, 333, 6349–6369', objective:'Jointly optimize truss shape and sizing under frequency (dynamic) constraints.', methods:'Orthogonal multi-GSA applied to benchmark trusses with frequency constraints.', findings:'The method handles frequency constraints effectively while minimizing weight.', notes:'', link:'https://doi.org/10.1016/j.jsv.2014.07.027', nodeIds:['swarm_gsa','prob_shape','prob_size']},
+{id:'prayogo2018', title:'Differential Big Bang – Big Crunch Algorithm for Construction-Engineering Design Optimization', authors:'Prayogo, D., Cheng, M.-Y., Wu, Y.-W., Herdany, A.A., & Prayogo, H.', year:2018, journal:'Automation in Construction, 85, 290–304', objective:'Combine differential-evolution mutation with Big Bang–Big Crunch for construction-engineering design.', methods:'Multiple construction-engineering design benchmarks compared against standard BB-BC, GA and PSO.', findings:'The hybrid DBB-BC outperforms its parent algorithms on convergence speed and solution quality.', notes:'', link:'https://doi.org/10.1016/j.autcon.2017.10.019', nodeIds:['evo_bbbc','evo_de']},
+{id:'cheng2014', title:'Symbiotic Organisms Search: A New Metaheuristic Optimization Algorithm', authors:'Cheng, M.-Y., & Prayogo, D.', year:2014, journal:'Computers & Structures, 139, 98–112', objective:'Introduce SOS, modeled on mutualism, commensalism and parasitism between organisms.', methods:'Standard benchmark functions and engineering design problems compared against GA, PSO and DE.', findings:'SOS is competitive or superior while requiring no algorithm-specific tuning parameters.', notes:'', link:'', nodeIds:['swarm_sos']},
+{id:'salcedosanz2009', title:'A Survey of Repair Methods Used as Constraint Handling Techniques in Evolutionary Algorithms', authors:'Salcedo-Sanz, S.', year:2009, journal:'Computer Science Review, 3(3), 175–192', objective:'Survey how evolutionary algorithms repair infeasible candidate solutions to satisfy constraints.', methods:'Literature survey across multiple constraint-handling strategies and application domains.', findings:'Repair-based methods often outperform penalty-based methods, but the best choice is problem-dependent.', notes:'', link:'https://doi.org/10.1016/j.cosrev.2009.07.001', nodeIds:['theory_repair','prob_constrainthandling']},
+{id:'wolpert1997', title:'No Free Lunch Theorems for Optimization', authors:'Wolpert, D., & Macready, W.', year:1997, journal:'IEEE Transactions on Evolutionary Computation, 1(1), 67–82', objective:'Formally prove that, averaged across all possible problems, no optimization algorithm outperforms any other.', methods:'Theoretical / mathematical proof across the space of all discrete optimization problems.', findings:'Algorithm performance is fundamentally problem-dependent — there is no universally best optimizer.', notes:'The theoretical justification cited in both Quidilla\'s and Mirafuentes\' proposals for testing PO on a new problem class.', link:'https://doi.org/10.1109/4235.585893', nodeIds:['theory_nfl']},
+{id:'mantegna1994', title:'Stochastic Process with Ultraslow Convergence to a Gaussian: The Truncated Lévy Flight', authors:'Mantegna, R.N., & Stanley, H.E.', year:1994, journal:'Physical Review Letters, 73, 2946–2949', objective:'Characterize the truncated Lévy-flight stochastic process mathematically.', methods:'Statistical-physics derivation and simulation of the truncated Lévy distribution.', findings:'Establishes the mathematical basis later reused to generate Lévy-flight step sizes inside metaheuristics like PO and Lévy-GWO.', notes:'', link:'https://doi.org/10.1103/PhysRevLett.73.2946', nodeIds:['swarm_levy']},
+{id:'talbi2009', title:'Metaheuristics: From Design to Implementation', authors:'Talbi, E.', year:2009, journal:'Wiley', objective:'Provide a unified taxonomy and design framework covering essentially all metaheuristic families.', methods:'Comprehensive textbook synthesis of trajectory-based, population-based, swarm and hybrid methods.', findings:'Establishes the common design vocabulary (exploration/exploitation, intensification/diversification) used across the field.', notes:'', link:'', nodeIds:['theory_metadesign','swarm_aco','evo_ga']},
+{id:'radosavljevic2018', title:'Metaheuristic Optimization in Power Engineering', authors:'Radosavljević, J.', year:2018, journal:'Institution of Engineering and Technology', objective:'Survey metaheuristic applications specifically within power-systems engineering.', methods:'Textbook synthesis of GA, PSO, and other metaheuristics applied to power-engineering problems.', findings:'Demonstrates that the same metaheuristic families used in structural engineering transfer directly to other engineering domains.', notes:'', link:'', nodeIds:['theory_metadesign']},
+{id:'zak2003', title:'Systems and Control', authors:'Żak, S.H. (Ed.)', year:2003, journal:'Oxford University Press', objective:'Provide the classical systems/control-theory background underlying stability and optimization formulations.', methods:'Textbook coverage of systems and control theory.', findings:'Supplies foundational mathematical tools referenced by the thesis proposals\' theoretical background.', notes:'', link:'', nodeIds:['theory_hub']},
+{id:'dorigo1997', title:'Ant Colony System: A Cooperative Learning Approach to the Traveling Salesman Problem', authors:'Dorigo, M., & Gambardella, L.', year:1997, journal:'IEEE Transactions on Evolutionary Computation, 1, 53–66', objective:'Introduce the Ant Colony System, a refinement of ant-colony optimization.', methods:'Traveling Salesman Problem benchmarks compared against earlier ant-system variants.', findings:'ACS converges faster and more reliably than the original ant system.', notes:'', link:'', nodeIds:['swarm_aco']},
+{id:'dumonteil1992', title:'Simple Equations for Effective Length Factors', authors:'Dumonteil, P.', year:1992, journal:'Engineering Journal, 29(3), 111–115', objective:'Derive approximate closed-form equations for column effective-length factors in braced and unbraced frames.', methods:'Analytical derivation and comparison against exact stability-function solutions.', findings:'Provides the approximate K-factor formula used directly in this thesis\' frame-stability calculations.', notes:'Used in Quidilla\'s proposal to compute the in-plane effective length factor for unbraced frame columns.', link:'https://doi.org/10.62913/engj.v29i3.592', nodeIds:['theory_effectivelength','prob_frame']},
+{id:'salehi2018', title:'Emerging Artificial Intelligence Methods in Structural Engineering', authors:'Salehi, H., & Burgueño, R.', year:2018, journal:'Engineering Structures, 171, 170–189', objective:'Survey where AI and machine-learning methods are entering structural-engineering practice.', methods:'Literature survey across structural health monitoring, design optimization and damage detection.', findings:'Metaheuristic design optimization is identified as one of the most mature AI applications in structural engineering.', notes:'', link:'https://doi.org/10.1016/j.engstruct.2018.05.084', nodeIds:['rev_aiinstructural']},
+{id:'wuchow1995', title:'Steady-State Genetic Algorithms for Discrete Optimization of Trusses', authors:'Wu, S.-J., & Chow, P.-T.', year:1995, journal:'Computers & Structures, 56(6), 979–991', objective:'Apply a steady-state (rather than generational) GA variant to discrete truss sizing.', methods:'Classic discrete truss benchmarks compared against generational GA.', findings:'The steady-state variant converges more efficiently than standard generational GA.', notes:'', link:'https://doi.org/10.1016/0045-7949(94)00551-D', nodeIds:['evo_ga','prob_truss','prob_discrete']},
+{id:'rajeev1992', title:'Discrete Optimization of Structures Using Genetic Algorithms', authors:'Rajeev, S., & Krishnamoorthy, C.S.', year:1992, journal:'Journal of Structural Engineering, 118(5), 1233–1250', objective:'One of the earliest applications of GA to discrete structural optimization.', methods:'Classic discrete truss/frame benchmarks solved with a binary-coded GA.', findings:'GA reliably finds near-optimal discrete designs without needing gradient information.', notes:'A foundational, early paper establishing GA as viable for structural design.', link:'https://doi.org/10.1061/(ASCE)0733-9445(1992)118', nodeIds:['evo_ga','prob_discrete']},
+{id:'gandomi2013', title:'Cuckoo Search Algorithm: A Metaheuristic Approach to Solve Structural Optimization Problems', authors:'Gandomi, A.H., Yang, X.-S., & Alavi, A.H.', year:2013, journal:'Engineering with Computers, 29(1), 17–35', objective:'Apply Cuckoo Search, a Lévy-flight-based metaheuristic, to structural optimization problems.', methods:'Classic truss and frame benchmarks compared against GA, PSO and other metaheuristics.', findings:'Cuckoo Search performs competitively, benefiting from its Lévy-flight step distribution.', notes:'', link:'', nodeIds:['swarm_cuckoo','prob_hub']},
+{id:'hasancebi2012', title:'An Exponential Big Bang-Big Crunch Algorithm for Discrete Design Optimization of Steel Frames', authors:'Hasançebi, O., & Kazemzadeh Azad, S.', year:2012, journal:'Computers & Structures, 110–111, 167–179', objective:'Adapt Big Bang–Big Crunch with an exponential contraction schedule for discrete steel frame design.', methods:'Benchmark steel frame problems compared against standard BB-BC and other metaheuristics.', findings:'The exponential variant improves convergence speed on discrete frame design.', notes:'', link:'https://doi.org/10.1016/j.compstruc.2012.07.014', nodeIds:['evo_bbbc','prob_frame','prob_discrete']},
+{id:'erol2006', title:'A New Optimization Method: Big Bang–Big Crunch', authors:'Erol, O.K., & Eksin, I.', year:2006, journal:'Advances in Engineering Software, 37(2), 106–111', objective:'Introduce the Big Bang–Big Crunch algorithm.', methods:'Standard benchmark functions compared against GA.', findings:'BB-BC converges faster than GA on the tested benchmark functions with a simpler algorithmic structure.', notes:'', link:'https://doi.org/10.1016/j.advengsoft.2005.04.005', nodeIds:['evo_bbbc']},
+{id:'geem2001', title:'A New Heuristic Optimization Algorithm: Harmony Search', authors:'Geem, Z., Kim, J., & Loganathan, G.V.', year:2001, journal:'Simulation, 76, 60–68', objective:'Introduce Harmony Search, modeled on musical improvisation.', methods:'Benchmark optimization problems compared against GA.', findings:'Harmony Search performs competitively while using a conceptually different search operator set than GA.', notes:'', link:'', nodeIds:['evo_hs']},
+{id:'leegeem2004', title:'A New Structural Optimization Method Based on the Harmony Search Algorithm', authors:'Lee, K.S., & Geem, Z.W.', year:2004, journal:'Computers & Structures, 82, 781–798', objective:'Apply Harmony Search directly to structural size/shape optimization.', methods:'Classic truss benchmarks compared against GA.', findings:'Harmony Search matches or beats GA on the tested structural problems.', notes:'', link:'https://doi.org/10.1016/j.compstruc.2004.01.002', nodeIds:['evo_hs','prob_hub']},
+{id:'leegeem2005', title:'The Harmony Search Heuristic Algorithm for Discrete Structural Optimization', authors:'Lee, K.S., Geem, Z.W., Lee, S.H., & Bae, K.W.', year:2005, journal:'Engineering Optimization, 37(7), 663–684', objective:'Extend Harmony Search specifically to discrete-variable structural optimization.', methods:'Discrete truss and frame benchmarks compared against GA and other discrete optimizers.', findings:'Harmony Search remains competitive on discrete design spaces with standard section catalogs.', notes:'', link:'', nodeIds:['evo_hs','prob_discrete']},
+{id:'charalampakis2019', title:'Critical Evaluation of Metaheuristic Algorithms for Weight Minimization of Truss Structures', authors:'Charalampakis, A.E., & Tsiatas, G.C.', year:2019, journal:'Frontiers in Built Environment, 5:113', objective:'Critically and absolutely (not just relatively) compare GA, PSO, ABC, DE and SA on truss weight minimization.', methods:'Multiple benchmark truss problems with displacement and stress constraints, varying complexity.', findings:'Performance rankings shift depending on problem complexity — reinforcing that no single algorithm dominates.', notes:'', link:'https://doi.org/10.3389/fbuil.2019.00113', nodeIds:['rev_charalampakis','prob_truss','prob_weight']},
+{id:'prayogo2022', title:'Layout, Topology, and Size Optimization of Steel Frame Design Using Metaheuristic Algorithms: A Comparative Study', authors:'Prayogo, D., Santoso, H., Budiman, F., & Jason, M.', year:2022, journal:'Civil Engineering Dimension, 24(1), 31–37', objective:'Compare PSO, Differential Evolution and Symbiotic Organisms Search for layout, topology and size optimization of seismic-resistant steel frames.', methods:'Three benchmark steel frame case studies under SNI 1726:2019, SNI 1729:2020 and SNI 7860:2020.', findings:'SOS consistently produced lighter, better-converging designs than PSO and DE; PSO showed the greatest variability.', notes:'', link:'https://doi.org/10.9744/ced.24.1.31-37', nodeIds:['rev_prayogo2022','prob_frame','prob_seismic','swarm_pso','evo_de','swarm_sos']},
+{id:'storn1997', title:'Differential Evolution – A Simple and Efficient Heuristic for Global Optimization over Continuous Spaces', authors:'Storn, R., & Price, K.', year:1997, journal:'Journal of Global Optimization, 11, 341–359', objective:'Introduce Differential Evolution as a simple vector-difference mutation scheme.', methods:'Standard continuous global-optimization benchmark functions.', findings:'DE is simple to implement yet highly competitive on continuous optimization benchmarks.', notes:'', link:'', nodeIds:['evo_de']},
+{id:'quidilla-thesis', title:'Proposed Parrot Optimizer in the Design Application of Planar Trusses and Frames', authors:'Quidilla, Michael James C.', year:2025, journal:'MS Research Proposal, USC Dept. of Civil Engineering', objective:'Evaluate PO\'s performance on both planar truss and planar frame benchmark problems against other metaheuristics.', methods:'Benchmark problems from the literature (incl. Alberdi & Khandelwal 2015 frames), compared to GA, PSO and GWO.', findings:'Proposal stage — establishes the research gap that published PO applications to planar trusses/frames remain limited.', notes:'The proposal this entire 4-thesis program is built from. Thesis adviser for this study.', link:'', nodeIds:['thesis_quidilla','po_hub','prob_truss','prob_frame']},
+{id:'mirafuentes-thesis', title:'Parrot Optimizer: Planar Truss Application', authors:'Mirafuentes, John Marl Nellas', year:2026, journal:'Undergraduate Research Proposal, USC Dept. of Civil Engineering (CE 4116)', objective:'Evaluate PO on benchmark and real-life planar truss design problems against PSO, GA and GWO.', methods:'Benchmark and real-life truss case studies; weight, cross-sectional area, convergence and stability compared across algorithms.', findings:'Proposal stage — reviews the same PO literature this map is built from.', notes:'Sibling thesis under the same research program, planar trusses instead of frames.', link:'', nodeIds:['thesis_mirafuentes','po_hub','prob_truss']},
+{id:'this-thesis', title:'Design Optimization of Planar Steel Frames Using the Parrot Optimizer (working title)', authors:'You + groupmate', year:2026, journal:'Undergraduate Thesis, USC Dept. of Civil Engineering (CE 4116)', objective:'Evaluate PO\'s performance on planar (2D) steel moment frame design/weight-minimization problems under AISC 360-99.', methods:'To be finalized — benchmark frame problems (likely incl. Alberdi & Khandelwal 2015), compared against PSO, GA and/or GWO.', findings:'In progress.', notes:'This is your thesis. Keep this node\'s paper list updated as your own work develops.', link:'', nodeIds:['thesis_thisstudy','prob_frame','po_hub']},
+];
+
+/* ============================================================
+   graph assembly
+   ============================================================ */
+const CLUSTER_COLOR = Object.fromEntries(CLUSTERS.map(c => [c.id, c.color]));
+CLUSTER_COLOR['root'] = 'var(--root)';
+
+function buildClusterHubNodes(){
+  return CLUSTERS.map(c => ({id:c.id+'_hub', label:c.name, type:'cluster', cluster:c.id,
+    desc: NODES.find(n=>n.id===c.id+'_hub')?.desc || ''}));
+}
+// NODES already includes *_hub entries authored above; keep as single source of truth.
+
+let nodes = NODES.map(n => ({...n}));
+let papers = PAPERS.map(p => ({...p}));
+let hierEdges = HIER_EDGES.map(([s,t]) => ({source:s, target:t, kind:'hier'}));
+
+function computeCoTagEdges(nodeList, paperList){
+  const topicIds = new Set(nodeList.filter(n => n.type==='topic').map(n=>n.id));
+  const weight = {};
+  paperList.forEach(p => {
+    const ids = [...new Set((p.nodeIds||[]).filter(id => topicIds.has(id)))];
+    for (let i=0;i<ids.length;i++){
+      for (let j=i+1;j<ids.length;j++){
+        const a=ids[i], b=ids[j];
+        const key = a<b ? a+'|'+b : b+'|'+a;
+        weight[key] = (weight[key]||0)+1;
+      }
+    }
+  });
+  return Object.entries(weight).map(([k,w]) => {
+    const [source,target] = k.split('|');
+    return {source, target, weight:w, kind:'cotag'};
+  });
+}
+
+function paperCountFor(nodeId){
+  return papers.filter(p => (p.nodeIds||[]).includes(nodeId)).length;
+}
+
+function radiusFor(node){
+  const base = {root:50, cluster:23, topic:9}[node.type] ?? 9;
+  const n = paperCountFor(node.id);
+  return base + Math.sqrt(n) * 3.4;
+}
+
+/* ============================================================
+   svg / force setup
+   ============================================================ */
+const svg = d3.select('svg');
+const viewport = d3.select('#viewport');
+const layerLinks = d3.select('#layer-links');
+const layerNodes = d3.select('#layer-nodes');
+let width = window.innerWidth, height = window.innerHeight;
+
+const zoomBehavior = d3.zoom().scaleExtent([0.25, 3]).on('zoom', (ev) => {
+  viewport.attr('transform', ev.transform);
+});
+svg.call(zoomBehavior);
+
+let simulation;
+let linkSel, nodeSel;
+let edges = [];
+
+function restartSimulation(){
+  // Defensive: never let a stray/unresolvable id crash the layout (d3 throws
+  // "node not found" and would otherwise hang the whole page on load).
+  const idSet = new Set(nodes.map(n => n.id));
+  const raw = [...hierEdges, ...computeCoTagEdges(nodes, papers)];
+  edges = raw.filter(e => {
+    const s = e.source && e.source.id ? e.source.id : e.source;
+    const t = e.target && e.target.id ? e.target.id : e.target;
+    return idSet.has(s) && idSet.has(t);
+  });
+
+  const linkForce = d3.forceLink(edges).id(d => d.id)
+    .distance(d => d.kind === 'hier' ? (d.source.type === 'root' || d.target.type === 'root' ? 190 : 95) : 150 / Math.sqrt(d.weight))
+    .strength(d => d.kind === 'hier' ? 0.55 : Math.min(0.9, 0.15 * d.weight));
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link', linkForce)
+    .force('charge', d3.forceManyBody().strength(d => d.type==='root' ? -1400 : d.type==='cluster' ? -520 : -140))
+    .force('center', d3.forceCenter(0,0))
+    .force('collide', d3.forceCollide().radius(d => radiusFor(d) + 14).strength(0.85))
+    .force('x', d3.forceX(0).strength(0.02))
+    .force('y', d3.forceY(0).strength(0.02))
+    .alpha(1).alphaDecay(0.025)
+    .on('tick', ticked);
+
+  render();
+}
+
+function colorOf(d){
+  if (d.type === 'root') return 'var(--root)';
+  return CLUSTER_COLOR[d.cluster] || '#888';
+}
+
+function render(){
+  linkSel = layerLinks.selectAll('line.link').data(edges, d => (d.source.id||d.source)+'>'+(d.target.id||d.target));
+  linkSel.exit().remove();
+  const linkEnter = linkSel.enter().append('line').attr('class', d => 'link ' + d.kind);
+  linkSel = linkEnter.merge(linkSel);
+
+  nodeSel = layerNodes.selectAll('g.node').data(nodes, d => d.id);
+  nodeSel.exit().remove();
+  const nodeEnter = nodeSel.enter().append('g')
+    .attr('class', d => 'node node-glow' + (d.type==='root' ? ' root' : ''))
+    .call(drag(simulation))
+    .on('click', (ev,d) => { ev.stopPropagation(); openDrawer(d); })
+    .on('mouseenter', (ev,d) => hoverNode(d, true))
+    .on('mousemove', (ev,d) => moveTooltip(ev))
+    .on('mouseleave', (ev,d) => hoverNode(d, false));
+
+  nodeEnter.append('circle').attr('class','core');
+  nodeEnter.append('text').attr('class','label').attr('text-anchor','middle');
+
+  nodeSel = nodeEnter.merge(nodeSel);
+  nodeSel.select('circle.core')
+    .attr('r', d => radiusFor(d))
+    .attr('fill', d => colorOf(d))
+    .attr('fill-opacity', d => d.type==='topic' ? 0.85 : 1);
+  nodeSel.select('text.label')
+    .attr('dy', d => radiusFor(d) + 13)
+    .attr('font-size', d => d.type==='root' ? 13.5 : d.type==='cluster' ? 11.5 : 10)
+    .text(d => d.label);
+
+  updateStats();
+}
+
+function ticked(){
+  linkSel
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+  nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+}
+
+function drag(sim){
+  function started(ev,d){ if(!ev.active) sim.alphaTarget(0.15).restart(); d.fx=d.x; d.fy=d.y; }
+  function dragged(ev,d){ d.fx=ev.x; d.fy=ev.y; }
+  function ended(ev,d){ if(!ev.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }
+  return d3.drag().on('start',started).on('drag',dragged).on('end',ended);
+}
+
+/* gentle perpetual "alive" motion: nudge the simulation instead of letting it die */
+setInterval(() => {
+  if (simulation && simulation.alpha() < 0.03){
+    simulation.alpha(0.045).restart();
+  }
+}, 3400);
+
+/* ---------- hover ---------- */
+const neighborsOf = (id) => {
+  const s = new Set([id]);
+  edges.forEach(e => {
+    const a = e.source.id||e.source, b = e.target.id||e.target;
+    if (a===id) s.add(b); if (b===id) s.add(a);
+  });
+  return s;
+};
+
+function hoverNode(d, on){
+  const tt = document.getElementById('tooltip');
+  if (!on){ tt.style.display='none'; nodeSel.classed('dim',false).classed('hi',false); linkSel.classed('dim',false).classed('hi',false); return; }
+  const nb = neighborsOf(d.id);
+  nodeSel.classed('dim', n => !nb.has(n.id)).classed('hi', n => n.id===d.id);
+  linkSel.classed('dim', e => (e.source.id||e.source)!==d.id && (e.target.id||e.target)!==d.id)
+         .classed('hi', e => (e.source.id||e.source)===d.id || (e.target.id||e.target)===d.id);
+  const n = paperCountFor(d.id);
+  tt.innerHTML = `<div class="tt-title">${d.label}</div><div class="tt-meta">${n} paper${n!==1?'s':''} tagged</div><div class="tt-desc">${d.desc||''}</div>`;
+  tt.style.display = 'block';
+}
+function moveTooltip(ev){
+  const tt = document.getElementById('tooltip');
+  tt.style.left = Math.min(ev.clientX+16, window.innerWidth-260) + 'px';
+  tt.style.top = Math.min(ev.clientY+16, window.innerHeight-120) + 'px';
+}
+
+/* ---------- resize ---------- */
+window.addEventListener('resize', () => {
+  width = window.innerWidth; height = window.innerHeight;
+});
+
+/* ============================================================
+   drawer
+   ============================================================ */
+function papersForNode(node){
+  if (node.type === 'root') return papers;
+  if (node.type === 'cluster'){
+    const children = new Set(nodes.filter(n => n.cluster===node.cluster && n.type==='topic').map(n=>n.id));
+    return papers.filter(p => (p.nodeIds||[]).some(id => id===node.id || children.has(id)));
+  }
+  return papers.filter(p => (p.nodeIds||[]).includes(node.id));
+}
+
+function openDrawer(node){
+  const drawer = document.getElementById('drawer');
+  const clusterTag = document.getElementById('drawer-cluster');
+  const clusterInfo = CLUSTERS.find(c=>c.id===node.cluster);
+  if (node.type === 'root'){
+    clusterTag.textContent = 'overview';
+    clusterTag.style.background = 'rgba(255,255,255,.08)'; clusterTag.style.color='var(--root)';
+  } else {
+    clusterTag.textContent = clusterInfo ? clusterInfo.name : '';
+    clusterTag.style.background = 'rgba(255,255,255,.06)';
+    clusterTag.style.color = colorOf(node);
+  }
+  document.getElementById('drawer-title').textContent = node.label;
+  document.getElementById('drawer-desc').textContent = node.desc || '';
+
+  const body = document.getElementById('drawer-body');
+  body.innerHTML = '';
+
+  if (node.type === 'root'){
+    const h = document.createElement('h3'); h.textContent = 'Browse by cluster'; body.appendChild(h);
+    CLUSTERS.forEach(c => {
+      const row = document.createElement('div'); row.className='subnode-link';
+      const cnt = papersForNode(nodes.find(n=>n.id===c.id+'_hub')).length;
+      row.innerHTML = `${c.name} <span class="n">${cnt}</span>`;
+      row.onclick = () => openDrawer(nodes.find(n=>n.id===c.id+'_hub'));
+      body.appendChild(row);
+    });
+  } else if (node.type === 'cluster'){
+    const h = document.createElement('h3'); h.textContent = 'Keywords in this cluster'; body.appendChild(h);
+    nodes.filter(n=>n.cluster===node.cluster && n.type==='topic').forEach(n => {
+      const row = document.createElement('div'); row.className='subnode-link';
+      row.innerHTML = `${n.label} <span class="n">${paperCountFor(n.id)}</span>`;
+      row.onclick = () => openDrawer(n);
+      body.appendChild(row);
+    });
+  }
+
+  const list = papersForNode(node);
+  const h2 = document.createElement('h3');
+  h2.textContent = node.type==='root' ? `All papers (${list.length})` : `Papers (${list.length})`;
+  body.appendChild(h2);
+  if (!list.length){
+    const p = document.createElement('div'); p.className='empty-note';
+    p.textContent = 'No papers tagged to this keyword yet — add one with the "+ Paper" button below.';
+    body.appendChild(p);
+  } else {
+    list.slice().sort((a,b)=> (b.year||0)-(a.year||0)).forEach(p => body.appendChild(paperCard(p)));
+  }
+
+  drawer.classList.add('open');
+}
+
+function paperCard(p){
+  const el = document.createElement('div'); el.className='paper-card';
+  el.innerHTML = `
+    <div class="paper-title">${p.title}</div>
+    <div class="paper-meta">${p.authors || 'Unknown author'} · ${p.year || 'n.d.'}${p.journal ? ' · '+p.journal : ''}</div>
+    ${p.objective ? `<div class="paper-field"><b>Objective</b> — ${p.objective}</div>` : ''}
+    ${p.methods ? `<div class="paper-field"><b>Methods</b> — ${p.methods}</div>` : ''}
+    ${p.findings ? `<div class="paper-field"><b>Findings</b> — ${p.findings}</div>` : ''}
+    ${p.notes ? `<div class="paper-field"><b>Notes</b> — ${p.notes}</div>` : ''}
+    ${p.link ? `<a class="paper-link" href="${p.link}" target="_blank" rel="noopener">Open source →</a>` : ''}
+  `;
+  return el;
+}
+
+document.getElementById('drawer-close').onclick = () => document.getElementById('drawer').classList.remove('open');
+document.getElementById('stage').addEventListener('click', () => document.getElementById('drawer').classList.remove('open'));
+
+/* ============================================================
+   legend
+   ============================================================ */
+function buildLegend(){
+  const box = document.getElementById('legend');
+  box.innerHTML = '<h2>Clusters</h2>';
+  CLUSTERS.forEach(c => {
+    const row = document.createElement('div'); row.className='legend-row'; row.dataset.cluster = c.id;
+    row.innerHTML = `<span class="legend-dot" style="background:${c.color}"></span><span>${c.name}</span>`;
+    row.onclick = () => toggleClusterDim(c.id, row);
+    box.appendChild(row);
+  });
+}
+let dimmedClusters = new Set();
+function toggleClusterDim(clusterId, row){
+  if (dimmedClusters.has(clusterId)){ dimmedClusters.delete(clusterId); row.classList.remove('dimmed'); }
+  else { dimmedClusters.add(clusterId); row.classList.add('dimmed'); }
+  if (dimmedClusters.size === 0){
+    nodeSel.classed('dim', false); linkSel.classed('dim', false);
+    return;
+  }
+  nodeSel.classed('dim', d => d.type!=='root' && dimmedClusters.has(d.cluster));
+  linkSel.classed('dim', e => {
+    const s = nodes.find(n=>n.id===(e.source.id||e.source));
+    const t = nodes.find(n=>n.id===(e.target.id||e.target));
+    return (s && s.type!=='root' && dimmedClusters.has(s.cluster)) || (t && t.type!=='root' && dimmedClusters.has(t.cluster));
+  });
+}
+
+/* ============================================================
+   stats
+   ============================================================ */
+function updateStats(){
+  document.getElementById('stats').innerHTML =
+    `<b>${nodes.length}</b> keywords · <b>${papers.length}</b> papers · <b>${edges.length}</b> connections`;
+}
+
+/* ============================================================
+   search
+   ============================================================ */
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q){ searchResults.style.display='none'; return; }
+  const matches = nodes.filter(n => n.label.toLowerCase().includes(q)).slice(0,8);
+  if (!matches.length){ searchResults.style.display='none'; return; }
+  searchResults.innerHTML='';
+  matches.forEach(n => {
+    const row = document.createElement('div');
+    row.innerHTML = `<span>${n.label}</span><span class="tag">${paperCountFor(n.id)}p</span>`;
+    row.onclick = () => { openDrawer(n); focusNode(n); searchResults.style.display='none'; searchInput.value=''; };
+    searchResults.appendChild(row);
+  });
+  searchResults.style.display='block';
+});
+document.addEventListener('click', (e) => { if (!searchInput.contains(e.target)) searchResults.style.display='none'; });
+
+function focusNode(n){
+  if (n.x==null) return;
+  const t = d3.zoomIdentity.translate(width/2, height/2).scale(1.15).translate(-n.x, -n.y);
+  svg.transition().duration(650).call(zoomBehavior.transform, t);
+}
+
+/* ============================================================
+   zoom controls
+   ============================================================ */
+document.getElementById('zoom-in').onclick = () => svg.transition().duration(300).call(zoomBehavior.scaleBy, 1.35);
+document.getElementById('zoom-out').onclick = () => svg.transition().duration(300).call(zoomBehavior.scaleBy, 1/1.35);
+document.getElementById('zoom-reset').onclick = () => svg.transition().duration(500).call(zoomBehavior.transform, d3.zoomIdentity.translate(width/2,height/2));
+
+/* ============================================================
+   toast
+   ============================================================ */
+let toastTimer;
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 3200);
+}
+
+/* ============================================================
+   sync layer — Firebase Firestore (works for anyone with the link,
+   any Claude account or none) + optional Claude `sample` capability
+   for AI-assisted placement when this page happens to be running
+   inside a claude.ai artifact. Loaded in the BACKGROUND, after the
+   graph is already on screen — never block first paint on a network
+   call. Missing capabilities just leave the page in local/manual mode.
+   ============================================================ */
+let sample = null, canPersist = false, userHasEdited = false;
+
+function withTimeout(promise, ms){
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+function waitForFB(){
+  return new Promise((resolve) => {
+    if (window.FB) return resolve(window.FB);
+    window.addEventListener('fb-ready', () => resolve(window.FB), {once:true});
+    setTimeout(() => resolve(window.FB || null), 8000);
+  });
+}
+
+async function initCapabilitiesBackground(){
+  try { sample = (window.claude && window.claude.use) ? await withTimeout(window.claude.use('sample'), 12000) : null; } catch(e){ sample = null; }
+  if (!sample){
+    const btn = document.getElementById('btn-add-kw');
+    if (btn) btn.textContent = 'Add manually';
+  }
+
+  const FB = await waitForFB();
+  if (!FB || !FB.ready()){
+    console.warn('Firebase isn\'t configured — running local-only. Paste a firebaseConfig near the top of this file to turn on live sync.');
+    return;
+  }
+
+  try {
+    const g = await FB.getGraph();
+    if (!g || !Array.isArray(g.nodes) || !g.nodes.length){
+      // first time this project's database has ever been opened — seed it
+      await FB.setGraph({nodes, hierEdges: HIER_EDGES.map(([s,t])=>({source:s,target:t})), updatedAt: Date.now()});
+      const existingPapers = await FB.getPapers();
+      if (!existingPapers.length) await FB.seedPapersBatch(PAPERS);
+    }
+    canPersist = true;
+    updateSyncBadge(true);
+    toast('Connected — live sync is on.');
+  } catch(e){ console.error('Firebase init failed:', e); return; }
+
+  // from here on, teammates' edits arrive live, no reload needed
+  FB.onGraphChange(g => {
+    if (!g || !Array.isArray(g.nodes)) return;
+    nodes = g.nodes;
+    hierEdges = (g.hierEdges || []).map(e => ({source:e.source, target:e.target, kind:'hier'}));
+    restartSimulation();
+  });
+  FB.onPapersChange(list => {
+    if (!list.length) return;
+    papers = list;
+    restartSimulation();
+  });
+}
+
+async function persistGraph(){
+  userHasEdited = true;
+  const FB = window.FB;
+  if (!FB || !FB.ready() || !canPersist) return;
+  try {
+    // merge with the latest cloud state first so a near-simultaneous
+    // teammate edit doesn't get overwritten by this full-document write
+    const latest = await FB.getGraph();
+    if (latest && Array.isArray(latest.nodes)){
+      const known = new Set(nodes.map(n=>n.id));
+      latest.nodes.forEach(n => { if (!known.has(n.id)){ nodes.push(n); known.add(n.id); } });
+      const edgeKey = e => (e.source.id||e.source)+'>'+(e.target.id||e.target);
+      const knownEdges = new Set(hierEdges.map(edgeKey));
+      (latest.hierEdges||[]).forEach(e => { const k=edgeKey(e); if(!knownEdges.has(k)){ hierEdges.push({source:e.source,target:e.target,kind:'hier'}); knownEdges.add(k); } });
+    }
+    await FB.setGraph({
+      nodes,
+      hierEdges: hierEdges.map(e => ({source: e.source.id||e.source, target: e.target.id||e.target})),
+      updatedAt: Date.now()
+    });
+  } catch(e){ /* best effort */ }
+}
+async function persistPaper(p){
+  userHasEdited = true;
+  const FB = window.FB;
+  if (!FB || !FB.ready() || !canPersist) return;
+  try { await FB.setPaper(p); } catch(e){ /* best effort */ }
+}
+function updateSyncBadge(on){
+  const el = document.getElementById('sync-badge');
+  if (el) el.style.display = on ? 'inline-block' : 'none';
+}
+
+/* ============================================================
+   add keyword (AI-assisted placement, with manual fallback)
+   ============================================================ */
+document.getElementById('btn-add-kw').onclick = async () => {
+  const input = document.getElementById('kw-input');
+  const label = input.value.trim();
+  if (!label) return;
+  const btn = document.getElementById('btn-add-kw');
+  btn.disabled = true;
+
+  if (sample){
+    btn.textContent = 'Placing…';
+    try {
+      const compact = nodes.filter(n=>n.type!=='root').map(n => `${n.id} :: ${n.label} [${n.cluster}] — ${(n.desc||'').slice(0,90)}`).join('\n');
+      const prompt = `You are placing a new keyword into an existing literature-map graph about the Parrot Optimizer applied to planar steel frame structural optimization.
+
+Existing nodes (id :: label [cluster] — description):
+${compact}
+
+Existing clusters: ${CLUSTERS.map(c=>c.id).join(', ')}
+
+New keyword to place: "${label}"
+
+Reply with ONLY a JSON object, no prose:
+{"label": "<cleaned up short label>", "description": "<one sentence, under 25 words>", "clusterId": "<one of the existing cluster ids>", "relatedIds": ["<0 to 4 existing node ids this concept is most related to>"]}`;
+      const data = await sample.json(prompt, {modelTier:'quick'});
+      const clusterId = CLUSTERS.some(c=>c.id===data.clusterId) ? data.clusterId : 'problem';
+      const relatedIds = Array.isArray(data.relatedIds) ? data.relatedIds.filter(id => nodes.some(n=>n.id===id)).slice(0,4) : [];
+      addKeywordNode(data.label || label, data.description || '', clusterId, relatedIds);
+      toast(`Placed "${data.label || label}" under ${CLUSTERS.find(c=>c.id===clusterId).name}`);
+    } catch(e){
+      toast('AI placement failed — placing under Structural Optimization Problems for now.');
+      addKeywordNode(label, '', 'problem', []);
+    }
+  } else {
+    addKeywordNode(label, '', 'problem', []);
+    toast('Added — open it and tag papers to connect it further.');
+  }
+  input.value = '';
+  btn.disabled = false;
+  btn.textContent = 'Place it';
+};
+
+function slugify(s){
+  return 'kw_' + s.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/(^_|_$)/g,'').slice(0,40) + '_' + Math.random().toString(36).slice(2,6);
+}
+
+function addKeywordNode(label, desc, clusterId, relatedIds){
+  userHasEdited = true;
+  const id = slugify(label);
+  const node = {id, label, type:'topic', cluster:clusterId, desc};
+  nodes.push(node);
+  hierEdges.push({source:clusterId+'_hub', target:id, kind:'hier'});
+  relatedIds.forEach(rid => hierEdges.push({source:id, target:rid, kind:'hier'}));
+  restartSimulation();
+  persistGraph();
+  setTimeout(() => openDrawer(node), 400);
+}
+
+document.getElementById('kw-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btn-add-kw').click();
+});
+
+/* ============================================================
+   add paper modal
+   ============================================================ */
+const veil = document.getElementById('veil-paper');
+document.getElementById('btn-add-paper').onclick = () => {
+  veil.classList.add('open');
+  document.getElementById('pick-list').style.display = sample ? 'none' : 'block';
+  if (!sample) buildPickList();
+};
+document.getElementById('p-cancel').onclick = () => veil.classList.remove('open');
+veil.addEventListener('click', (e) => { if (e.target === veil) veil.classList.remove('open'); });
+
+function buildPickList(){
+  const box = document.getElementById('pick-list');
+  box.innerHTML = '';
+  CLUSTERS.forEach(c => {
+    const label = document.createElement('div');
+    label.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.05em;';
+    label.textContent = c.name;
+    box.appendChild(label);
+    nodes.filter(n=>n.cluster===c.id && n.type==='topic').forEach(n => {
+      const row = document.createElement('label'); row.className='pick-item';
+      row.innerHTML = `<input type="checkbox" value="${n.id}"> ${n.label}`;
+      box.appendChild(row);
+    });
+  });
+}
+
+document.getElementById('p-save').onclick = async () => {
+  const title = document.getElementById('p-title').value.trim();
+  if (!title){ toast('Title is required.'); return; }
+  const authors = document.getElementById('p-authors').value.trim();
+  const year = parseInt(document.getElementById('p-year').value.trim()) || null;
+  const journal = document.getElementById('p-journal').value.trim();
+  const link = document.getElementById('p-link').value.trim();
+  const abstract = document.getElementById('p-abstract').value.trim();
+  const findings = document.getElementById('p-findings').value.trim();
+  const saveBtn = document.getElementById('p-save');
+  saveBtn.disabled = true;
+
+  let nodeIds = [];
+  if (sample){
+    document.getElementById('ai-status').textContent = 'Matching this paper to your keyword map…';
+    try {
+      const compact = nodes.filter(n=>n.type==='topic').map(n => `${n.id} :: ${n.label} — ${(n.desc||'').slice(0,80)}`).join('\n');
+      const prompt = `Given this paper, list which of the following existing keyword ids it relates to (1 to 6 ids, most relevant first). Reply with ONLY a JSON object: {"nodeIds": ["id1","id2"]}
+
+Paper title: ${title}
+Authors: ${authors}
+Year: ${year || 'unknown'}
+Objective/abstract: ${abstract || '(not provided)'}
+Findings: ${findings || '(not provided)'}
+
+Existing keyword ids (id :: label — description):
+${compact}`;
+      const data = await sample.json(prompt, {modelTier:'quick'});
+      nodeIds = Array.isArray(data.nodeIds) ? data.nodeIds.filter(id => nodes.some(n=>n.id===id && n.type==='topic')) : [];
+    } catch(e){ /* fall through to manual */ }
+    document.getElementById('ai-status').textContent = '';
+  }
+  if (!nodeIds.length){
+    nodeIds = Array.from(document.querySelectorAll('#pick-list input:checked')).map(i=>i.value);
+  }
+  if (!nodeIds.length){
+    toast('Could not place this paper automatically — tick at least one keyword.');
+    document.getElementById('pick-list').style.display = 'block';
+    buildPickList();
+    saveBtn.disabled = false;
+    return;
+  }
+
+  const id = 'p_' + title.toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,30) + '_' + Math.random().toString(36).slice(2,6);
+  const paper = {id, title, authors, year, journal, objective: abstract, methods:'', findings, notes:'Added from the map.', link, nodeIds};
+  userHasEdited = true;
+  papers.push(paper);
+  persistPaper(paper);
+  restartSimulation();
+  toast(`Added "${title}" — tagged to ${nodeIds.length} keyword${nodeIds.length!==1?'s':''}.`);
+
+  ['p-title','p-authors','p-year','p-journal','p-link','p-abstract','p-findings'].forEach(id => document.getElementById(id).value='');
+  veil.classList.remove('open');
+  saveBtn.disabled = false;
+};
+
+/* ============================================================
+   boot
+   ============================================================ */
+(function boot(){
+  // Render immediately from the bundled data — never block first paint on
+  // a network call. Saved/cloud state (if any) hydrates in the background
+  // and swaps in a moment later; AI placement lights up the same way.
+  try {
+    buildLegend();
+    restartSimulation();
+    svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(width/2, height/2).scale(0.82));
+  } catch(e){
+    console.error('Map failed to render:', e);
+    document.getElementById('loading-msg').textContent = 'something went wrong — try reloading';
+    return;
+  }
+  setTimeout(() => document.getElementById('loading').classList.add('hide'), 260);
+  initCapabilitiesBackground();
+})();
+</script>
+</body>
+</html>
