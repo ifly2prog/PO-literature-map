@@ -20,13 +20,12 @@
    nothing else in this file needs to change.
    ============================================================ */
 const firebaseConfig = {
-  apiKey: "AIzaSyCF8QjtIYavTKuXp18asZYEGv3Q9Ww1044",
-  authDomain: "project-parrot-9efc0.firebaseapp.com",
-  projectId: "project-parrot-9efc0",
-  storageBucket: "project-parrot-9efc0.firebasestorage.app",
-  messagingSenderId: "315128819206",
-  appId: "1:315128819206:web:ab3ba438533df0a3a21d87",
-  measurementId: "G-0D8JGQJK5T"
+  // apiKey: "...",
+  // authDomain: "...",
+  // projectId: "...",
+  // storageBucket: "...",
+  // messagingSenderId: "...",
+  // appId: "...",
 };
 
 let fbReady = false;
@@ -34,15 +33,21 @@ try {
   if (firebaseConfig.projectId) {
     const { initializeApp } = await import("https://cdn.jsdelivr.net/npm/firebase@12/app/+esm");
     const {
-      getFirestore, doc, getDoc, setDoc, onSnapshot,
-      collection, getDocs, writeBatch
+      getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot,
+      collection, getDocs, writeBatch, query, orderBy, limit
     } = await import("https://cdn.jsdelivr.net/npm/firebase@12/firestore/+esm");
+    const {
+      getStorage, ref, uploadBytes, getDownloadURL, deleteObject
+    } = await import("https://cdn.jsdelivr.net/npm/firebase@12/storage/+esm");
 
     const app = initializeApp(firebaseConfig);
     const dbfs = getFirestore(app);
+    let storage = null;
+    try { storage = getStorage(app); } catch (e) { storage = null; } // storage bucket may not be enabled yet
 
     window.FB = {
       ready: () => fbReady,
+      storageReady: () => !!storage,
       getGraph: async () => {
         const snap = await getDoc(doc(dbfs, 'meta', 'graph'));
         return snap.exists() ? snap.data() : null;
@@ -53,6 +58,7 @@ try {
         return snap.docs.map(d => d.data());
       },
       setPaper: async (p) => { await setDoc(doc(dbfs, 'papers', p.id), p); },
+      deletePaper: async (id) => { await deleteDoc(doc(dbfs, 'papers', id)); },
       seedPapersBatch: async (list) => {
         const batch = writeBatch(dbfs);
         list.forEach(p => batch.set(doc(dbfs, 'papers', p.id), p));
@@ -60,14 +66,39 @@ try {
       },
       onGraphChange: (cb) => onSnapshot(doc(dbfs, 'meta', 'graph'), snap => { if (snap.exists()) cb(snap.data()); }),
       onPapersChange: (cb) => onSnapshot(collection(dbfs, 'papers'), snap => cb(snap.docs.map(d => d.data()))),
+
+      // trash (undo / recently-deleted)
+      addTrash: async (entry) => {
+        const id = entry.trashId || (Date.now() + '_' + Math.random().toString(36).slice(2, 8));
+        await setDoc(doc(dbfs, 'trash', id), { ...entry, trashId: id });
+        return id;
+      },
+      removeTrash: async (id) => { await deleteDoc(doc(dbfs, 'trash', id)); },
+      listTrash: async (n) => {
+        const q = query(collection(dbfs, 'trash'), orderBy('deletedAt', 'desc'), limit(n || 30));
+        const snap = await getDocs(q);
+        return snap.docs.map(d => d.data());
+      },
+
+      // file attachments (Firebase Storage)
+      uploadFile: async (path, file) => {
+        if (!storage) throw new Error('Storage not enabled for this project yet.');
+        const r = ref(storage, path);
+        await uploadBytes(r, file);
+        return await getDownloadURL(r);
+      },
+      deleteFile: async (path) => {
+        if (!storage) return;
+        try { await deleteObject(ref(storage, path)); } catch (e) { /* best effort */ }
+      },
     };
     fbReady = true;
   } else {
-    window.FB = { ready: () => false };
+    window.FB = { ready: () => false, storageReady: () => false };
   }
 } catch (e) {
   console.error('Firebase failed to initialize:', e);
-  window.FB = { ready: () => false };
+  window.FB = { ready: () => false, storageReady: () => false };
 }
 window.dispatchEvent(new Event('fb-ready'));
 </script>
@@ -156,6 +187,7 @@ svg:active{cursor:grabbing;}
 #zoom-ctl button{width:34px; height:34px; border-radius:10px; border:1px solid var(--line); background:var(--panel);
   color:var(--ink-dim); font-size:16px; cursor:pointer; backdrop-filter:blur(10px);}
 #zoom-ctl button:hover{color:var(--ink); border-color:#3a4155;}
+#zoom-ctl .divider{height:1px; background:var(--line); margin:2px 4px;}
 
 /* ---------- graph elements ---------- */
 .link{stroke:#39424f; stroke-opacity:.28; fill:none;}
@@ -215,6 +247,21 @@ svg:active{cursor:grabbing;}
 .subnode-link:hover{color:var(--ink);}
 .subnode-link .n{font-family:var(--mono); font-size:10px; color:var(--ink-faint); float:right;}
 
+/* ---------- card / drawer action rows (edit, delete, attach) ---------- */
+.row-actions{display:flex; gap:12px; margin-top:9px;}
+.row-actions button{background:none; border:none; padding:0; font-family:var(--sans); font-size:11px;
+  color:var(--ink-faint); cursor:pointer;}
+.row-actions button:hover{color:var(--ink);}
+.row-actions button.danger:hover{color:#ff6b6b;}
+.attribution{font-family:var(--mono); font-size:10px; color:var(--ink-faint); margin-top:6px;}
+.file-chip{display:inline-flex; align-items:center; gap:6px; margin-top:9px; font-size:11.5px; color:var(--c-po);
+  text-decoration:none; border:1px solid var(--line); border-radius:20px; padding:4px 10px;}
+.file-chip:hover{border-color:var(--c-po);}
+.drawer-edit-form input, .drawer-edit-form textarea{width:100%; background:#141821; border:1px solid var(--line);
+  border-radius:9px; padding:8px 10px; color:var(--ink); font-family:var(--sans); font-size:13px; outline:none;
+  margin-bottom:8px; resize:vertical;}
+.drawer-edit-form .modal-actions{margin-top:6px;}
+
 /* ---------- modal (add paper) ---------- */
 .modal-veil{position:fixed; inset:0; background:rgba(2,2,3,.7); backdrop-filter:blur(4px); z-index:60;
   display:none; align-items:center; justify-content:center;}
@@ -226,6 +273,7 @@ svg:active{cursor:grabbing;}
 .field{margin-bottom:13px;}
 .field label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint);
   margin-bottom:6px;}
+.field-hint{font-size:11px; color:var(--ink-faint); margin-top:5px; line-height:1.5; text-transform:none;}
 .field input, .field textarea, .field select{width:100%; background:#141821; border:1px solid var(--line);
   border-radius:9px; padding:9px 11px; color:var(--ink); font-family:var(--sans); font-size:13px; outline:none;
   resize:vertical;}
@@ -238,6 +286,28 @@ svg:active{cursor:grabbing;}
 .pick-item{display:flex; align-items:center; gap:8px; padding:5px 2px; font-size:12.5px; color:var(--ink-dim);}
 .pick-item input{width:auto;}
 #ai-status{font-size:11.5px; color:var(--ink-faint); margin-top:10px; min-height:16px;}
+
+/* ---------- name prompt / identity ---------- */
+#whoami{position:fixed; bottom:26px; left:50%; transform:translateX(-50%); margin-bottom:52px; z-index:21;
+  font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); cursor:pointer; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px; padding:5px 12px; backdrop-filter:blur(10px); display:none;}
+#whoami:hover{color:var(--ink);}
+
+/* ---------- toolbar (export/import/trash — merged into zoom-ctl) ---------- */
+
+/* ---------- trash / recently-deleted list ---------- */
+.trash-item{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0;
+  border-bottom:1px solid var(--line-soft); font-size:12.5px;}
+.trash-item .meta{color:var(--ink-faint); font-family:var(--mono); font-size:10.5px; margin-top:2px;}
+.trash-item button{flex:none; background:rgba(47,227,184,.12); border:1px solid var(--c-po); color:var(--c-po);
+  border-radius:14px; padding:5px 12px; font-size:11.5px; cursor:pointer;}
+.trash-item button:hover{background:rgba(47,227,184,.22);}
+
+/* toast with an action button */
+#toast{display:flex; align-items:center; gap:12px;}
+#toast button{background:none; border:1px solid var(--c-po); color:var(--c-po); border-radius:12px; padding:3px 10px;
+  font-size:11px; cursor:pointer; font-family:var(--sans);}
+#toast button:hover{background:rgba(47,227,184,.15);}
 
 /* ---------- loading ---------- */
 #loading{position:fixed; inset:0; z-index:100; background:var(--bg); display:flex; align-items:center;
@@ -310,6 +380,8 @@ svg:active{cursor:grabbing;}
 
 <div id="legend"></div>
 
+<input id="import-file-input" type="file" accept="application/json" style="display:none;">
+
 <div id="controls">
   <input id="kw-input" type="text" placeholder="Add a keyword or concept…" autocomplete="off">
   <button class="btn btn-primary" id="btn-add-kw">Place it</button>
@@ -317,10 +389,16 @@ svg:active{cursor:grabbing;}
   <button class="btn btn-ghost" id="btn-add-paper">+ Paper</button>
 </div>
 
+<span id="whoami"></span>
+
 <div id="zoom-ctl">
   <button id="zoom-in" title="Zoom in">+</button>
   <button id="zoom-out" title="Zoom out">–</button>
   <button id="zoom-reset" title="Reset view">⤾</button>
+  <div class="divider"></div>
+  <button id="btn-export" title="Export a backup (.json)">⇩</button>
+  <button id="btn-import" title="Import a backup (.json)">⇧</button>
+  <button id="btn-trash" title="Recently deleted">🗑</button>
 </div>
 
 <div id="tooltip"></div>
@@ -332,13 +410,15 @@ svg:active{cursor:grabbing;}
     <span id="drawer-cluster"></span>
     <h2 id="drawer-title"></h2>
     <p id="drawer-desc"></p>
+    <div id="drawer-attribution" class="attribution"></div>
+    <div id="drawer-head-actions" class="row-actions"></div>
   </div>
   <div id="drawer-body"></div>
 </div>
 
 <div class="modal-veil" id="veil-paper">
   <div class="modal">
-    <h2>Add a research paper</h2>
+    <h2 id="paper-modal-title">Add a research paper</h2>
     <p class="sub">Fill in what you have — even just a title and link is fine. If AI placement is available, we'll suggest which keywords it belongs to; otherwise you can pick them yourself.</p>
     <div class="field"><label>Title *</label><input id="p-title" type="text" placeholder="e.g. Grey Wolf Optimizer"></div>
     <div class="field-row">
@@ -346,7 +426,11 @@ svg:active{cursor:grabbing;}
       <div class="field" style="max-width:110px;"><label>Year</label><input id="p-year" type="text" placeholder="2024"></div>
     </div>
     <div class="field"><label>Journal / Venue</label><input id="p-journal" type="text" placeholder="Advances in Engineering Software"></div>
-    <div class="field"><label>Link / DOI</label><input id="p-link" type="text" placeholder="https://doi.org/…"></div>
+    <div class="field">
+      <label>Link / DOI / Drive file</label>
+      <input id="p-link" type="text" placeholder="https://doi.org/… or a Google Drive share link">
+      <div class="field-hint">Got a PDF? Upload it to your group's Drive folder, set sharing to "Anyone with the link", and paste that link here.</div>
+    </div>
     <div class="field"><label>Objective / abstract (helps AI placement)</label><textarea id="p-abstract" rows="3" placeholder="What the paper set out to do…"></textarea></div>
     <div class="field"><label>Key findings (optional)</label><textarea id="p-findings" rows="2" placeholder="What they found…"></textarea></div>
     <div id="pick-list"></div>
@@ -354,6 +438,28 @@ svg:active{cursor:grabbing;}
     <div class="modal-actions">
       <button class="btn btn-ghost" id="p-cancel">Cancel</button>
       <button class="btn btn-primary" id="p-save">Add paper</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-veil" id="veil-name">
+  <div class="modal" style="width:380px;">
+    <h2>Who's editing?</h2>
+    <p class="sub">So your groupmates can see who added or changed what. Just a first name is fine — stored only in this browser.</p>
+    <div class="field"><input id="name-input" type="text" placeholder="e.g. Fly" autocomplete="off"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="name-save">Continue</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-veil" id="veil-trash">
+  <div class="modal">
+    <h2>Recently deleted</h2>
+    <p class="sub">Anything removed from the map, newest first. Restoring puts it straight back for everyone.</p>
+    <div id="trash-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="trash-close">Close</button>
     </div>
   </div>
 </div>
@@ -564,6 +670,60 @@ const PAPERS = [
 ];
 
 /* ============================================================
+   utilities: HTML-escaping, relative time, duplicate detection,
+   per-browser identity
+   ============================================================ */
+function escapeHtml(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function relTime(ts){
+  if (!ts) return '';
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+function normalizeText(s){
+  return (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function textSimilarity(a, b){
+  const A = new Set(normalizeText(a).split(' ').filter(Boolean));
+  const B = new Set(normalizeText(b).split(' ').filter(Boolean));
+  if (!A.size || !B.size) return 0;
+  let inter = 0; A.forEach(w => { if (B.has(w)) inter++; });
+  const union = new Set([...A, ...B]).size;
+  return union ? inter / union : 0;
+}
+function findLikelyDuplicate(text, list, key, threshold){
+  let best = null, bestScore = 0;
+  list.forEach(item => {
+    const score = textSimilarity(text, item[key]);
+    if (score > bestScore){ bestScore = score; best = item; }
+  });
+  return bestScore >= threshold ? { item: best, score: bestScore } : null;
+}
+function getUserName(){
+  try { return localStorage.getItem('pomap_name') || 'Someone'; } catch(e){ return 'Someone'; }
+}
+function setUserName(name){
+  try { localStorage.setItem('pomap_name', name); } catch(e){ /* private browsing etc. */ }
+  const el = document.getElementById('whoami');
+  if (el){ el.textContent = `You: ${name} (change)`; el.style.display = 'inline-block'; }
+}
+function ensureUserName(){
+  let name = null;
+  try { name = localStorage.getItem('pomap_name'); } catch(e){ /* ignore */ }
+  const el = document.getElementById('whoami');
+  if (name){
+    setUserName(name);
+  } else {
+    if (el){ el.textContent = 'Set your name'; el.style.display = 'inline-block'; }
+    document.getElementById('veil-name').classList.add('open');
+  }
+}
+
+/* ============================================================
    graph assembly
    ============================================================ */
 const CLUSTER_COLOR = Object.fromEntries(CLUSTERS.map(c => [c.id, c.color]));
@@ -623,6 +783,7 @@ const zoomBehavior = d3.zoom().scaleExtent([0.25, 3]).on('zoom', (ev) => {
 svg.call(zoomBehavior);
 
 let simulation;
+let currentDrawerNode = null;
 let linkSel, nodeSel;
 let edges = [];
 
@@ -730,7 +891,7 @@ function hoverNode(d, on){
   linkSel.classed('dim', e => (e.source.id||e.source)!==d.id && (e.target.id||e.target)!==d.id)
          .classed('hi', e => (e.source.id||e.source)===d.id || (e.target.id||e.target)===d.id);
   const n = paperCountFor(d.id);
-  tt.innerHTML = `<div class="tt-title">${d.label}</div><div class="tt-meta">${n} paper${n!==1?'s':''} tagged</div><div class="tt-desc">${d.desc||''}</div>`;
+  tt.innerHTML = `<div class="tt-title">${escapeHtml(d.label)}</div><div class="tt-meta">${n} paper${n!==1?'s':''} tagged</div><div class="tt-desc">${escapeHtml(d.desc||'')}</div>`;
   tt.style.display = 'block';
 }
 function moveTooltip(ev){
@@ -757,6 +918,7 @@ function papersForNode(node){
 }
 
 function openDrawer(node){
+  currentDrawerNode = node;
   const drawer = document.getElementById('drawer');
   const clusterTag = document.getElementById('drawer-cluster');
   const clusterInfo = CLUSTERS.find(c=>c.id===node.cluster);
@@ -770,6 +932,21 @@ function openDrawer(node){
   }
   document.getElementById('drawer-title').textContent = node.label;
   document.getElementById('drawer-desc').textContent = node.desc || '';
+  document.getElementById('drawer-title').style.display = '';
+  document.getElementById('drawer-desc').style.display = '';
+
+  const attr = document.getElementById('drawer-attribution');
+  attr.textContent = node.addedBy ? `Added by ${node.addedBy}${node.editedBy ? ' · edited by ' + node.editedBy : ''}` : '';
+
+  const headActions = document.getElementById('drawer-head-actions');
+  headActions.innerHTML = ''; headActions.style.display = '';
+  if (node.type === 'topic'){
+    const editBtn = document.createElement('button'); editBtn.textContent = 'Edit';
+    editBtn.onclick = () => startNodeEdit(node);
+    const delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.className = 'danger';
+    delBtn.onclick = () => deleteNodeWithConfirm(node);
+    headActions.appendChild(editBtn); headActions.appendChild(delBtn);
+  }
 
   const body = document.getElementById('drawer-body');
   body.innerHTML = '';
@@ -779,7 +956,7 @@ function openDrawer(node){
     CLUSTERS.forEach(c => {
       const row = document.createElement('div'); row.className='subnode-link';
       const cnt = papersForNode(nodes.find(n=>n.id===c.id+'_hub')).length;
-      row.innerHTML = `${c.name} <span class="n">${cnt}</span>`;
+      row.innerHTML = `${escapeHtml(c.name)} <span class="n">${cnt}</span>`;
       row.onclick = () => openDrawer(nodes.find(n=>n.id===c.id+'_hub'));
       body.appendChild(row);
     });
@@ -787,7 +964,7 @@ function openDrawer(node){
     const h = document.createElement('h3'); h.textContent = 'Keywords in this cluster'; body.appendChild(h);
     nodes.filter(n=>n.cluster===node.cluster && n.type==='topic').forEach(n => {
       const row = document.createElement('div'); row.className='subnode-link';
-      row.innerHTML = `${n.label} <span class="n">${paperCountFor(n.id)}</span>`;
+      row.innerHTML = `${escapeHtml(n.label)} <span class="n">${paperCountFor(n.id)}</span>`;
       row.onclick = () => openDrawer(n);
       body.appendChild(row);
     });
@@ -808,22 +985,127 @@ function openDrawer(node){
   drawer.classList.add('open');
 }
 
+function startNodeEdit(node){
+  const head = document.getElementById('drawer-head');
+  const title = document.getElementById('drawer-title');
+  const desc = document.getElementById('drawer-desc');
+  const actions = document.getElementById('drawer-head-actions');
+  title.style.display = 'none'; desc.style.display = 'none'; actions.style.display = 'none';
+
+  const form = document.createElement('div'); form.className = 'drawer-edit-form'; form.id = 'drawer-edit-form';
+  const labelInput = document.createElement('input'); labelInput.type = 'text'; labelInput.value = node.label;
+  const descInput = document.createElement('textarea'); descInput.rows = 3; descInput.value = node.desc || '';
+  const actionsRow = document.createElement('div'); actionsRow.className = 'modal-actions';
+  const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn btn-ghost'; cancelBtn.textContent = 'Cancel';
+  const saveBtn = document.createElement('button'); saveBtn.className = 'btn btn-primary'; saveBtn.textContent = 'Save';
+  actionsRow.appendChild(cancelBtn); actionsRow.appendChild(saveBtn);
+  form.appendChild(labelInput); form.appendChild(descInput); form.appendChild(actionsRow);
+  head.insertBefore(form, document.getElementById('drawer-attribution'));
+
+  cancelBtn.onclick = () => {
+    form.remove();
+    title.style.display = ''; desc.style.display = ''; actions.style.display = '';
+  };
+  saveBtn.onclick = () => {
+    const newLabel = labelInput.value.trim();
+    if (!newLabel) return;
+    node.label = newLabel;
+    node.desc = descInput.value.trim();
+    node.editedBy = getUserName();
+    node.editedAt = Date.now();
+    persistGraph();
+    restartSimulation();
+    form.remove();
+    openDrawer(node);
+  };
+}
+
+async function deleteNodeWithConfirm(node){
+  if (!confirm(`Delete "${node.label}"? It disappears from the map for everyone right away — you'll get a few seconds to undo.`)) return;
+
+  const relatedEdges = hierEdges
+    .filter(e => (e.source.id||e.source) === node.id || (e.target.id||e.target) === node.id)
+    .map(e => ({ source: e.source.id||e.source, target: e.target.id||e.target }));
+  const affectedPapers = papers.filter(p => (p.nodeIds||[]).includes(node.id)).map(p => p.id);
+
+  nodes = nodes.filter(n => n.id !== node.id);
+  hierEdges = hierEdges.filter(e => (e.source.id||e.source) !== node.id && (e.target.id||e.target) !== node.id);
+  affectedPapers.forEach(id => {
+    const p = papers.find(pp => pp.id === id);
+    if (p){ p.nodeIds = (p.nodeIds||[]).filter(nid => nid !== node.id); persistPaper(p); }
+  });
+
+  document.getElementById('drawer').classList.remove('open');
+  restartSimulation();
+  persistGraph();
+
+  let trashId = null;
+  if (window.FB && window.FB.ready()){
+    try { trashId = await window.FB.addTrash({ type:'node', data:node, relatedEdges, affectedPapers, deletedBy:getUserName(), deletedAt:Date.now() }); }
+    catch(e){ /* best effort */ }
+  }
+
+  toast(`Deleted "${node.label}"`, { actionLabel:'Undo', onAction: async () => {
+    nodes.push(node);
+    relatedEdges.forEach(e => hierEdges.push({ source:e.source, target:e.target, kind:'hier' }));
+    affectedPapers.forEach(id => {
+      const p = papers.find(pp => pp.id === id);
+      if (p && !(p.nodeIds||[]).includes(node.id)){ p.nodeIds = [...(p.nodeIds||[]), node.id]; persistPaper(p); }
+    });
+    restartSimulation(); persistGraph();
+    if (trashId && window.FB) window.FB.removeTrash(trashId).catch(()=>{});
+  }});
+}
+
+async function deletePaperWithConfirm(p){
+  if (!confirm(`Delete "${p.title}"? You'll get a few seconds to undo.`)) return;
+  papers = papers.filter(pp => pp.id !== p.id);
+  if (window.FB && window.FB.ready()){ try { await window.FB.deletePaper(p.id); } catch(e){ /* best effort */ } }
+  restartSimulation();
+  if (currentDrawerNode) openDrawer(currentDrawerNode);
+
+  let trashId = null;
+  if (window.FB && window.FB.ready()){
+    try { trashId = await window.FB.addTrash({ type:'paper', data:p, deletedBy:getUserName(), deletedAt:Date.now() }); }
+    catch(e){ /* best effort */ }
+  }
+
+  toast(`Deleted "${p.title}"`, { actionLabel:'Undo', onAction: async () => {
+    if (!papers.some(pp => pp.id === p.id)){ papers.push(p); persistPaper(p); }
+    restartSimulation();
+    if (currentDrawerNode) openDrawer(currentDrawerNode);
+    if (trashId && window.FB) window.FB.removeTrash(trashId).catch(()=>{});
+  }});
+}
+
 function paperCard(p){
   const el = document.createElement('div'); el.className='paper-card';
+  const addedLine = p.addedBy ? `Added by ${escapeHtml(p.addedBy)}${p.addedAt ? ' · ' + relTime(p.addedAt) : ''}` : '';
+  const editedLine = p.editedBy ? ` · edited by ${escapeHtml(p.editedBy)}` : '';
   el.innerHTML = `
-    <div class="paper-title">${p.title}</div>
-    <div class="paper-meta">${p.authors || 'Unknown author'} · ${p.year || 'n.d.'}${p.journal ? ' · '+p.journal : ''}</div>
-    ${p.objective ? `<div class="paper-field"><b>Objective</b> — ${p.objective}</div>` : ''}
-    ${p.methods ? `<div class="paper-field"><b>Methods</b> — ${p.methods}</div>` : ''}
-    ${p.findings ? `<div class="paper-field"><b>Findings</b> — ${p.findings}</div>` : ''}
-    ${p.notes ? `<div class="paper-field"><b>Notes</b> — ${p.notes}</div>` : ''}
-    ${p.link ? `<a class="paper-link" href="${p.link}" target="_blank" rel="noopener">Open source →</a>` : ''}
+    <div class="paper-title">${escapeHtml(p.title)}</div>
+    <div class="paper-meta">${escapeHtml(p.authors) || 'Unknown author'} · ${p.year || 'n.d.'}${p.journal ? ' · '+escapeHtml(p.journal) : ''}</div>
+    ${p.objective ? `<div class="paper-field"><b>Objective</b> — ${escapeHtml(p.objective)}</div>` : ''}
+    ${p.methods ? `<div class="paper-field"><b>Methods</b> — ${escapeHtml(p.methods)}</div>` : ''}
+    ${p.findings ? `<div class="paper-field"><b>Findings</b> — ${escapeHtml(p.findings)}</div>` : ''}
+    ${p.notes ? `<div class="paper-field"><b>Notes</b> — ${escapeHtml(p.notes)}</div>` : ''}
+    ${p.link ? `<a class="paper-link" href="${escapeHtml(p.link)}" target="_blank" rel="noopener">Open source →</a>` : ''}
+    ${p.fileUrl ? `<a class="file-chip" href="${escapeHtml(p.fileUrl)}" target="_blank" rel="noopener">📄 ${escapeHtml(p.fileName||'attachment')}</a>` : ''}
+    ${addedLine ? `<div class="attribution">${addedLine}${editedLine}</div>` : ''}
   `;
+  const actions = document.createElement('div'); actions.className = 'row-actions';
+  const editBtn = document.createElement('button'); editBtn.textContent = 'Edit';
+  editBtn.onclick = () => openPaperModalForEdit(p);
+  const delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.className = 'danger';
+  delBtn.onclick = () => deletePaperWithConfirm(p);
+  actions.appendChild(editBtn); actions.appendChild(delBtn);
+  el.appendChild(actions);
   return el;
 }
 
 document.getElementById('drawer-close').onclick = () => document.getElementById('drawer').classList.remove('open');
 document.getElementById('stage').addEventListener('click', () => document.getElementById('drawer').classList.remove('open'));
+
 
 /* ============================================================
    legend
@@ -900,11 +1182,18 @@ document.getElementById('zoom-reset').onclick = () => svg.transition().duration(
    toast
    ============================================================ */
 let toastTimer;
-function toast(msg){
+function toast(msg, opts){
   const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
+  t.innerHTML = '';
+  const span = document.createElement('span'); span.textContent = msg; t.appendChild(span);
+  if (opts && opts.actionLabel){
+    const btn = document.createElement('button'); btn.textContent = opts.actionLabel;
+    btn.onclick = () => { clearTimeout(toastTimer); t.classList.remove('show'); if (opts.onAction) opts.onAction(); };
+    t.appendChild(btn);
+  }
+  t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>t.classList.remove('show'), 3200);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), (opts && opts.actionLabel) ? 8000 : 3200);
 }
 
 /* ============================================================
@@ -1012,6 +1301,14 @@ document.getElementById('btn-add-kw').onclick = async () => {
   const label = input.value.trim();
   if (!label) return;
   const btn = document.getElementById('btn-add-kw');
+  const btnDefaultLabel = sample ? 'Place it' : 'Add manually';
+
+  const dup = findLikelyDuplicate(label, nodes.filter(n=>n.type==='topic'), 'label', 0.65);
+  if (dup && !confirm(`This looks a lot like the existing keyword "${dup.item.label}". Add "${label}" as a separate keyword anyway?\n\n(Cancel to open "${dup.item.label}" instead.)`)){
+    openDrawer(dup.item);
+    return;
+  }
+
   btn.disabled = true;
 
   if (sample){
@@ -1044,7 +1341,7 @@ Reply with ONLY a JSON object, no prose:
   }
   input.value = '';
   btn.disabled = false;
-  btn.textContent = 'Place it';
+  btn.textContent = btnDefaultLabel;
 };
 
 function slugify(s){
@@ -1054,7 +1351,7 @@ function slugify(s){
 function addKeywordNode(label, desc, clusterId, relatedIds){
   userHasEdited = true;
   const id = slugify(label);
-  const node = {id, label, type:'topic', cluster:clusterId, desc};
+  const node = {id, label, type:'topic', cluster:clusterId, desc, addedBy:getUserName(), addedAt:Date.now()};
   nodes.push(node);
   hierEdges.push({source:clusterId+'_hub', target:id, kind:'hier'});
   relatedIds.forEach(rid => hierEdges.push({source:id, target:rid, kind:'hier'}));
@@ -1068,20 +1365,48 @@ document.getElementById('kw-input').addEventListener('keydown', (e) => {
 });
 
 /* ============================================================
-   add paper modal
+   add / edit paper modal
    ============================================================ */
 const veil = document.getElementById('veil-paper');
+let editingPaper = null; // set when editing an existing paper instead of adding a new one
+
+function resetPaperModal(){
+  editingPaper = null;
+  document.getElementById('paper-modal-title').textContent = 'Add a research paper';
+  document.getElementById('p-save').textContent = 'Add paper';
+  ['p-title','p-authors','p-year','p-journal','p-link','p-abstract','p-findings'].forEach(id => document.getElementById(id).value = '');
+}
+
+function openPaperModalForEdit(p){
+  editingPaper = p;
+  document.getElementById('paper-modal-title').textContent = 'Edit paper';
+  document.getElementById('p-save').textContent = 'Save changes';
+  document.getElementById('p-title').value = p.title || '';
+  document.getElementById('p-authors').value = p.authors || '';
+  document.getElementById('p-year').value = p.year || '';
+  document.getElementById('p-journal').value = p.journal || '';
+  document.getElementById('p-link').value = p.link || '';
+  document.getElementById('p-abstract').value = p.objective || '';
+  document.getElementById('p-findings').value = p.findings || '';
+  document.getElementById('pick-list').style.display = 'block';
+  buildPickList(p.nodeIds || []);
+  veil.classList.add('open');
+}
+
 document.getElementById('btn-add-paper').onclick = () => {
+  resetPaperModal();
   veil.classList.add('open');
   document.getElementById('pick-list').style.display = sample ? 'none' : 'block';
-  if (!sample) buildPickList();
+  if (!sample) buildPickList([]);
 };
-document.getElementById('p-cancel').onclick = () => veil.classList.remove('open');
-veil.addEventListener('click', (e) => { if (e.target === veil) veil.classList.remove('open'); });
+document.getElementById('p-cancel').onclick = () => { veil.classList.remove('open'); resetPaperModal(); };
+veil.addEventListener('click', (e) => { if (e.target === veil){ veil.classList.remove('open'); resetPaperModal(); } });
 
-function buildPickList(){
+
+function buildPickList(checkedIds){
   const box = document.getElementById('pick-list');
   box.innerHTML = '';
+  const checked = new Set(checkedIds || []);
   CLUSTERS.forEach(c => {
     const label = document.createElement('div');
     label.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.05em;';
@@ -1089,7 +1414,7 @@ function buildPickList(){
     box.appendChild(label);
     nodes.filter(n=>n.cluster===c.id && n.type==='topic').forEach(n => {
       const row = document.createElement('label'); row.className='pick-item';
-      row.innerHTML = `<input type="checkbox" value="${n.id}"> ${n.label}`;
+      row.innerHTML = `<input type="checkbox" value="${n.id}" ${checked.has(n.id)?'checked':''}> ${escapeHtml(n.label)}`;
       box.appendChild(row);
     });
   });
@@ -1105,6 +1430,12 @@ document.getElementById('p-save').onclick = async () => {
   const abstract = document.getElementById('p-abstract').value.trim();
   const findings = document.getElementById('p-findings').value.trim();
   const saveBtn = document.getElementById('p-save');
+
+  if (!editingPaper){
+    const dup = findLikelyDuplicate(title, papers, 'title', 0.6);
+    if (dup && !confirm(`This looks similar to an existing paper: "${dup.item.title}" (${dup.item.year||'n.d.'}). Add this as a separate paper anyway?`)) return;
+  }
+
   saveBtn.disabled = true;
 
   let nodeIds = [];
@@ -1133,22 +1464,180 @@ ${compact}`;
   if (!nodeIds.length){
     toast('Could not place this paper automatically — tick at least one keyword.');
     document.getElementById('pick-list').style.display = 'block';
-    buildPickList();
+    buildPickList(editingPaper ? editingPaper.nodeIds : []);
     saveBtn.disabled = false;
     return;
   }
 
-  const id = 'p_' + title.toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,30) + '_' + Math.random().toString(36).slice(2,6);
-  const paper = {id, title, authors, year, journal, objective: abstract, methods:'', findings, notes:'Added from the map.', link, nodeIds};
+  // file attachments are handled via Drive links pasted into the Link field,
+  // not upload — carry over any fileUrl only if this paper already had one
+  // from before (e.g. a prior test), never set a new one here.
+  const fileUrl = editingPaper ? (editingPaper.fileUrl || null) : null;
+  const fileName = editingPaper ? (editingPaper.fileName || null) : null;
+
   userHasEdited = true;
-  papers.push(paper);
+  let paper;
+  if (editingPaper){
+    paper = { ...editingPaper, title, authors, year, journal, objective:abstract, findings, link, nodeIds, fileUrl, fileName,
+      editedBy:getUserName(), editedAt:Date.now() };
+    const idx = papers.findIndex(pp => pp.id === paper.id);
+    if (idx >= 0) papers[idx] = paper; else papers.push(paper);
+    toast(`Saved changes to "${title}".`);
+  } else {
+    const id = 'p_' + title.toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,30) + '_' + Math.random().toString(36).slice(2,6);
+    paper = {id, title, authors, year, journal, objective:abstract, methods:'', findings, notes:'', link, nodeIds, fileUrl, fileName,
+      addedBy:getUserName(), addedAt:Date.now()};
+    papers.push(paper);
+    toast(`Added "${title}" — tagged to ${nodeIds.length} keyword${nodeIds.length!==1?'s':''}.`);
+  }
   persistPaper(paper);
   restartSimulation();
-  toast(`Added "${title}" — tagged to ${nodeIds.length} keyword${nodeIds.length!==1?'s':''}.`);
+  if (currentDrawerNode) openDrawer(currentDrawerNode);
 
-  ['p-title','p-authors','p-year','p-journal','p-link','p-abstract','p-findings'].forEach(id => document.getElementById(id).value='');
+  resetPaperModal();
   veil.classList.remove('open');
   saveBtn.disabled = false;
+};
+
+/* ============================================================
+   backup: export / import
+   ============================================================ */
+function exportBackup(){
+  const data = {
+    exportedAt: new Date().toISOString(),
+    nodes,
+    hierEdges: hierEdges.map(e => ({source: e.source.id||e.source, target: e.target.id||e.target})),
+    papers,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'po-map-backup-' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast('Backup downloaded.');
+}
+
+async function importBackup(file){
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch(e){
+    toast('That file isn\'t valid JSON.');
+    return;
+  }
+  if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.papers)){
+    toast('That file doesn\'t look like a map backup.');
+    return;
+  }
+  if (!confirm(`This REPLACES the live map for everyone with "${file.name}" (${data.nodes.length} keywords, ${data.papers.length} papers). This can't be undone. Continue?`)) return;
+
+  nodes = data.nodes;
+  hierEdges = (data.hierEdges || []).map(e => ({source:e.source, target:e.target, kind:'hier'}));
+  papers = data.papers;
+  restartSimulation();
+
+  if (window.FB && window.FB.ready()){
+    try {
+      await window.FB.setGraph({ nodes, hierEdges: data.hierEdges || [], updatedAt: Date.now() });
+      for (let i = 0; i < papers.length; i += 10){
+        const chunk = papers.slice(i, i + 10);
+        await Promise.all(chunk.map(p => window.FB.setPaper(p).catch(()=>{})));
+      }
+      toast('Backup restored for everyone.');
+    } catch(e){
+      toast('Restored locally, but saving to the shared map failed — try again.');
+    }
+  } else {
+    toast('Restored locally (not connected to live sync).');
+  }
+}
+
+document.getElementById('btn-export').onclick = exportBackup;
+document.getElementById('btn-import').onclick = () => document.getElementById('import-file-input').click();
+document.getElementById('import-file-input').addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) importBackup(f);
+  e.target.value = '';
+});
+
+/* ============================================================
+   recently deleted (trash)
+   ============================================================ */
+async function openTrashModal(){
+  const list = document.getElementById('trash-list');
+  list.innerHTML = '<div class="empty-note">Loading…</div>';
+  document.getElementById('veil-trash').classList.add('open');
+  if (!window.FB || !window.FB.ready()){
+    list.innerHTML = '<div class="empty-note">Not connected to live sync, so there\'s no shared history to show here.</div>';
+    return;
+  }
+  try {
+    const items = await window.FB.listTrash(40);
+    if (!items.length){ list.innerHTML = '<div class="empty-note">Nothing deleted yet.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(entry => {
+      const row = document.createElement('div'); row.className = 'trash-item';
+      const name = entry.type === 'node' ? entry.data.label : entry.data.title;
+      const left = document.createElement('div');
+      left.innerHTML = `${escapeHtml(name)}<div class="meta">${entry.type} · deleted by ${escapeHtml(entry.deletedBy||'someone')} · ${relTime(entry.deletedAt)}</div>`;
+      const btn = document.createElement('button'); btn.textContent = 'Restore';
+      btn.onclick = () => restoreTrashEntry(entry);
+      row.appendChild(left); row.appendChild(btn);
+      list.appendChild(row);
+    });
+  } catch(e){
+    list.innerHTML = '<div class="empty-note">Could not load history — try again in a moment.</div>';
+  }
+}
+
+async function restoreTrashEntry(entry){
+  if (entry.type === 'node'){
+    const node = entry.data;
+    if (!nodes.some(n => n.id === node.id)) nodes.push(node);
+    (entry.relatedEdges || []).forEach(e => hierEdges.push({source:e.source, target:e.target, kind:'hier'}));
+    (entry.affectedPapers || []).forEach(id => {
+      const p = papers.find(pp => pp.id === id);
+      if (p && !(p.nodeIds||[]).includes(node.id)){ p.nodeIds = [...(p.nodeIds||[]), node.id]; persistPaper(p); }
+    });
+    restartSimulation();
+    persistGraph();
+  } else {
+    const p = entry.data;
+    if (!papers.some(pp => pp.id === p.id)){ papers.push(p); persistPaper(p); restartSimulation(); }
+  }
+  if (entry.trashId && window.FB && window.FB.ready()){
+    try { await window.FB.removeTrash(entry.trashId); } catch(e){ /* best effort */ }
+  }
+  toast('Restored.');
+  openTrashModal();
+}
+
+document.getElementById('btn-trash').onclick = openTrashModal;
+document.getElementById('trash-close').onclick = () => document.getElementById('veil-trash').classList.remove('open');
+document.getElementById('veil-trash').addEventListener('click', (e) => {
+  if (e.target.id === 'veil-trash') e.currentTarget.classList.remove('open');
+});
+
+/* ============================================================
+   identity — "who's editing" prompt
+   ============================================================ */
+document.getElementById('name-save').onclick = () => {
+  const v = document.getElementById('name-input').value.trim();
+  if (!v) return;
+  setUserName(v);
+  document.getElementById('veil-name').classList.remove('open');
+};
+document.getElementById('name-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('name-save').click();
+});
+document.getElementById('veil-name').addEventListener('click', (e) => {
+  if (e.target.id === 'veil-name') e.currentTarget.classList.remove('open');
+});
+document.getElementById('whoami').onclick = () => {
+  const current = getUserName();
+  document.getElementById('name-input').value = current === 'Someone' ? '' : current;
+  document.getElementById('veil-name').classList.add('open');
 };
 
 /* ============================================================
@@ -1168,6 +1657,7 @@ ${compact}`;
     return;
   }
   setTimeout(() => document.getElementById('loading').classList.add('hide'), 260);
+  ensureUserName();
   initCapabilitiesBackground();
 })();
 </script>
